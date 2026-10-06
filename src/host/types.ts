@@ -61,6 +61,12 @@ export interface Identity {
   /** did:kreivo:… once on-chain identity is wired */
   did: string | null;
   signedIn: boolean;
+  /** the member id at the edition's door, once signed in with a passkey */
+  userId?: string | null;
+  /** the app's session token from that door (identifies, never authorises) */
+  session?: string | null;
+  /** when that session runs out, unix seconds */
+  sessionExp?: number | null;
 }
 
 /** What the host passes to each module panel. */

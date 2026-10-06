@@ -117,9 +117,10 @@ export const BRAND_PRESETS: { id: string; label: string; skin: Partial<Skin> }[]
       label: "Four To The Floor",
       skin: {
         name: "FTTF",
-        spectrum: ["#a855f7", "#ec4899", "#f97316"],
-        accent: "#a855f7",
-        bg: "#fefeff",
+        logo: "/brand/fttf.png",
+        spectrum: ["#0a0a0a", "#ff6a00", "#0a0a0a"],
+        accent: "#ff6a00",
+        bg: "#ffffff",
         radius: 6,
       },
     },
