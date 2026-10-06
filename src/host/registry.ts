@@ -60,10 +60,10 @@ function isPlugin(x: unknown): x is MurmurModule {
  * surfaced in the catalog and rail — the rest stay in the codebase, hidden,
  * and are added back by appending their id as their backends mature.
  *
- * v1: chat (Matrix), meet (Chaos Sessions), pay (Decent Pay), magazine.
- * Held back: understand, watch, contact, network, build, publish, invite.
+ * Set per edition (`../edition.ts`). Murmur and Decent: chat, meet, pay,
+ * magazine. FTTF: watch, chat.
  */
-export const RELEASE_PLUGINS = ["chat", "meet", "pay", "magazine"];
+export const RELEASE_PLUGINS = edition.plugins;
 
 export const pluginCatalog: MurmurModule[] = Object.values(discovered)
   .flatMap((mod) => Object.values(mod))
@@ -74,7 +74,7 @@ export const pluginCatalog: MurmurModule[] = Object.values(discovered)
 /** Plugins installed on a fresh client — the full v1 surface. Notes (core) is
  *  always mounted alongside these. Collaborate lives inside Notes. Anything
  *  held back from `RELEASE_PLUGINS` cannot be installed until it's released. */
-export const DEFAULT_INSTALLED = ["meet", "chat", "pay", "magazine"];
+export const DEFAULT_INSTALLED = edition.plugins;
 
 const all = [...coreModules, ...pluginCatalog];
 

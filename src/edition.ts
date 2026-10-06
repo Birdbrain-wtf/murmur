@@ -1,5 +1,5 @@
 /**
- * One codebase, two editions.
+ * One codebase, an edition per collective.
  *
  * - `murmur` is Birdbrain's open app: the public repo builds this one. It is
  *   bound to Birdbrain, wears the bird, and ships no updater of ours until
@@ -11,7 +11,7 @@
  * Chosen at build time by `VITE_EDITION`. Unset means `decent`, so the existing
  * release path and every shipped install are unchanged.
  */
-export type EditionId = "murmur" | "decent";
+export type EditionId = string;
 
 export interface Edition {
   id: EditionId;
@@ -30,6 +30,13 @@ export interface Edition {
   vaultSync: boolean;
   /** what notes say they write into */
   vaultName: string;
+  /** the plugins this edition offers, which are also what a fresh install has */
+  plugins: string[];
+  /** the surface the window opens on */
+  home: string;
+  /** passkey sign-in through the member's browser: the app asks `pair` for a
+   *  code, opens `approve + code` where the member's passkey lives, and polls */
+  signIn: { pair: string; approve: string; app: string };
 }
 
 const EDITIONS: Record<EditionId, Edition> = {
@@ -42,6 +49,13 @@ const EDITIONS: Record<EditionId, Edition> = {
     selfUpdate: false,
     vaultSync: false,
     vaultName: "this device",
+    plugins: ["meet", "chat", "pay", "magazine"],
+    home: "notes",
+    signIn: {
+      app: "murmur",
+      pair: "https://birdbrain.wtf/api/chaos/app/pair",
+      approve: "https://birdbrain.wtf/birdbrain/app-link?code=",
+    },
   },
   decent: {
     id: "decent",
@@ -52,6 +66,14 @@ const EDITIONS: Record<EditionId, Edition> = {
     selfUpdate: true,
     vaultSync: true,
     vaultName: "the Decent vault",
+    plugins: ["meet", "chat", "pay", "magazine"],
+    home: "notes",
+    // Decent members hold the same identities and sign in at the same door.
+    signIn: {
+      app: "decent",
+      pair: "https://rw.zo.space/api/chaos/app/pair",
+      approve: "https://birdbrain.wtf/birdbrain/app-link?code=",
+    },
   },
 };
 

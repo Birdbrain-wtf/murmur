@@ -7,17 +7,27 @@ import {
   type ReactNode,
 } from "react";
 import type { Identity } from "../host/types";
+import type { SignedIn } from "./passkey";
 
 const KEY = "murmur.identity.v1";
+
+const SIGNED_OUT: Identity = { handle: null, localId: null, did: null, signedIn: false };
 
 function load(): Identity {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw) as Identity;
+    if (raw) {
+      const id = JSON.parse(raw) as Identity;
+      // A passkey session that has run out signs the app out; the member signs in again.
+      if (id.session && id.sessionExp && id.sessionExp < Date.now() / 1000) return SIGNED_OUT;
+      // A name typed before passkey sign-in existed proves nothing: ask again.
+      if (id.signedIn && !id.session) return SIGNED_OUT;
+      return id;
+    }
   } catch {
     /* ignore */
   }
-  return { handle: null, localId: null, did: null, signedIn: false };
+  return SIGNED_OUT;
 }
 
 function randomLocalId(): string {
@@ -28,7 +38,7 @@ function randomLocalId(): string {
 
 interface IdentityApi {
   identity: Identity;
-  signIn: (handle: string) => void;
+  signIn: (who: SignedIn) => void;
   signOut: () => void;
 }
 
@@ -37,11 +47,9 @@ const Ctx = createContext<IdentityApi | null>(null);
 /**
  * Identity for the client, shared across the rail and the identity surface.
  *
- * v0.1 establishes a durable local identity (handle + opaque id). The real
- * on-ramp is "Sign in with Decent": a passkey (WebAuthn / Virto Connect) check
- * against services/chaos-auth that, once Kreivo issues DIDs, attaches
- * `did:kreivo:…`. Until that RP is reachable from this client, we hold a local
- * identity so every module has something stable to bind to.
+ * Signing in is a passkey, approved in the member's own browser at the
+ * edition's door (`passkey.ts`). What the app keeps is the door's session for
+ * this app: who they are, never a key. `did:kreivo:…` attaches later.
  */
 export function IdentityProvider({ children }: { children: ReactNode }) {
   const [identity, setIdentity] = useState<Identity>(load);
@@ -50,17 +58,20 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
     localStorage.setItem(KEY, JSON.stringify(identity));
   }, [identity]);
 
-  const signIn = useCallback((handle: string) => {
+  const signIn = useCallback((who: SignedIn) => {
     setIdentity((prev) => ({
-      handle: handle.trim() || "anon",
+      handle: who.displayName,
       localId: prev.localId ?? randomLocalId(),
       did: prev.did,
       signedIn: true,
+      userId: who.userId,
+      session: who.session,
+      sessionExp: who.exp,
     }));
   }, []);
 
   const signOut = useCallback(() => {
-    setIdentity({ handle: null, localId: null, did: null, signedIn: false });
+    setIdentity(SIGNED_OUT);
   }, []);
 
   return (

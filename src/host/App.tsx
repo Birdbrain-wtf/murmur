@@ -22,7 +22,7 @@ export default function App() {
   const { identity } = useIdentity();
   const { skin } = useSkin();
   const updater = useUpdater();
-  const [activeId, setActiveId] = useState("notes");
+  const [activeId, setActiveId] = useState(edition.home);
   const [catalogOpen, setCatalogOpen] = useState(false);
 
   // notes is the body core surface; settings + identity are pinned to the foot.

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Fingerprint,
   Sprout,
@@ -10,65 +10,112 @@ import {
 import type { MurmurModule, PluginContext } from "../host/types";
 import { useIdentity } from "./useIdentity";
 import { edition } from "../edition";
+import { openInBrowser, startPairing, type Pairing, type SignedIn } from "./passkey";
+
+/**
+ * Sign in with a passkey, in the browser. The app shows the code it asked for,
+ * opens the door's approval page, and waits for the member to say yes there.
+ */
+function PasskeySignIn({ onSignedIn }: { onSignedIn: (who: SignedIn) => void }) {
+  const [pairing, setPairing] = useState<Pairing | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const live = useRef<Pairing | null>(null);
+  const site = new URL(edition.signIn.approve).host;
+
+  useEffect(() => () => live.current?.cancel(), []);
+
+  async function begin() {
+    setError(null);
+    setBusy(true);
+    try {
+      const p = await startPairing();
+      live.current = p;
+      setPairing(p);
+      await openInBrowser(p.url);
+      const who = await p.done;
+      onSignedIn(who);
+    } catch (e: any) {
+      if (e?.message !== "cancelled") setError(e?.message || "That did not work. Try again.");
+      setPairing(null);
+    } finally {
+      setBusy(false);
+      live.current = null;
+    }
+  }
+
+  function cancel() {
+    live.current?.cancel();
+    setPairing(null);
+  }
+
+  return (
+    <div className="w-full max-w-sm rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] p-6">
+      <div
+        className="mb-5 flex h-12 w-12 items-center justify-center rounded-[var(--radius)]"
+        style={{ background: "var(--spectrum)" }}
+      >
+        <Fingerprint className="h-6 w-6 text-white" />
+      </div>
+      <div className="font-tight text-lg font-medium">
+        Sign in to {edition.productName}
+      </div>
+      {!pairing ? (
+        <>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            With the passkey you already use at {site}. Your browser opens, you
+            approve there, and you come back signed in.
+          </p>
+          <button
+            onClick={begin}
+            disabled={busy}
+            className="prism-hover mt-5 flex w-full items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--line-strong)] py-2.5 text-sm font-medium disabled:opacity-50"
+          >
+            {busy ? "Opening your browser…" : "Sign in with your passkey"} <ArrowRight className="h-4 w-4" />
+          </button>
+          {error && <p className="mt-3 text-sm text-[#c1271d]">{error}</p>}
+        </>
+      ) : (
+        <>
+          <p className="mt-1 text-sm text-[var(--muted)]">
+            We opened {site} in your browser. Check it shows this code, then
+            approve it there.
+          </p>
+          <div className="font-mono mt-5 rounded-[var(--radius)] border border-[var(--line-strong)] py-3 text-center text-2xl tracking-[0.18em]">
+            {pairing.code.slice(0, 4)}-{pairing.code.slice(4)}
+          </div>
+          <p className="font-mono mt-3 text-center text-[11px] text-[var(--faint)]">waiting for you to approve…</p>
+          <div className="mt-4 flex items-center justify-between text-xs">
+            <button onClick={() => openInBrowser(pairing.url)} className="underline underline-offset-4 text-[var(--muted)]">
+              Open the page again
+            </button>
+            <button onClick={cancel} className="underline underline-offset-4 text-[var(--muted)]">
+              Cancel
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
 
 /**
  * Identity — core surface.
  *
  * Who you are, and how you show up in the work: your sign-in, the seeds you've
  * planted (participation), and a visual reference of the flock's work. Sign-in
- * is branded "Sign in with Decent" — today it sets a local identity; the seam
- * is a passkey (Virto Connect / WebAuthn) check against chaos-auth that issues
- * a Kreivo DID and, behind it, a Matrix session for `chat`.
+ * is a passkey approved in the browser at the edition's own door; a Kreivo DID
+ * and a Matrix session for `chat` attach to it later.
  */
 function Panel({ instance }: PluginContext) {
   const { identity, signIn, signOut } = useIdentity();
-  const [handle, setHandle] = useState("");
 
   if (!identity.signedIn) {
     return (
       <div className="flex h-full flex-col">
         <SurfaceHeader title="Identity" eyebrow="identity" />
         <div className="flex flex-1 items-center justify-center px-8">
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (handle.trim()) signIn(handle);
-            }}
-            className="w-full max-w-sm rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] p-6"
-          >
-            <div
-              className="mb-5 flex h-12 w-12 items-center justify-center rounded-[var(--radius)]"
-              style={{ background: "var(--spectrum)" }}
-            >
-              <Fingerprint className="h-6 w-6 text-white" />
-            </div>
-            <div className="font-tight text-lg font-medium">
-              Sign in with {edition.instance.name}
-            </div>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              One identity across every module — chat, notes, meet. Choose a
-              handle to start.
-            </p>
-            <div className="prism-hover mt-5 flex items-center gap-2 rounded-[var(--radius)] border border-[var(--line-strong)] px-3 py-2.5">
-              <input
-                autoFocus
-                value={handle}
-                onChange={(e) => setHandle(e.target.value)}
-                placeholder="your handle"
-                className="w-full bg-transparent text-sm outline-none placeholder:text-[var(--faint)]"
-              />
-            </div>
-            <button
-              type="submit"
-              className="prism-hover mt-4 flex w-full items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--line-strong)] py-2.5 text-sm font-medium"
-            >
-              Sign in with {edition.instance.name} <ArrowRight className="h-4 w-4" />
-            </button>
-            <p className="font-mono mt-4 text-[10px] leading-relaxed text-[var(--faint)]">
-              Next: passkey (Virto Connect) → Kreivo DID. The same gesture mints
-              your Matrix session — no separate chat login.
-            </p>
-          </form>
+          <PasskeySignIn onSignedIn={signIn} />
         </div>
       </div>
     );
@@ -98,7 +145,7 @@ function Panel({ instance }: PluginContext) {
               {identity.handle}
             </div>
             <div className="font-mono mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-[var(--faint)]">
-              <span>local · {identity.localId}</span>
+              <span>{identity.userId ? `${edition.instance.name} · ${identity.userId}` : `local · ${identity.localId}`}</span>
               <span className="inline-flex items-center gap-1">
                 <ShieldCheck className="h-3 w-3" />
                 {identity.did ?? "did:kreivo — pending"}

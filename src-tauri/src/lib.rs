@@ -2,6 +2,7 @@
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_opener::init())
         .setup(|_app| {
             // Self-update is desktop-only; mobile updates via the app store.
             #[cfg(desktop)]
