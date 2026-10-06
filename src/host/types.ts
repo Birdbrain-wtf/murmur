@@ -1,0 +1,85 @@
+import type { ComponentType } from "react";
+import type { LucideIcon } from "lucide-react";
+
+/**
+ * The Decent module contract (type name kept as the codename `Murmur*`).
+ *
+ * A Decent instance is a thin host that mounts modules. Two are *core* and
+ * always present — `identity` (who you are + your participation) and `notes`
+ * (personal sensemaking). Everything else is a *plugin* the user installs over
+ * time from the catalog: `understand` (Birdbrain), `chat` (Matrix), `meet`
+ * (Jitsi), `contact` (email) and `network` (federation). All implement this
+ * one interface, so the shell treats them uniformly.
+ */
+export interface MurmurModule {
+  /** stable id, kebab-case (e.g. "chat", "understand", "network") */
+  id: string;
+  /** human label shown in the rail */
+  title: string;
+  /** one-line description for tooltips / the catalog */
+  tagline: string;
+  /** rail / catalog icon */
+  icon: LucideIcon;
+  /** ordering weight in the rail (lower = higher) */
+  order: number;
+  /** the panel rendered when this module is active */
+  Panel: ComponentType<PluginContext>;
+  /**
+   * "core" modules are always mounted (identity, notes). "plugin" modules are
+   * installed by the user over time from the catalog.
+   */
+  kind: "core" | "plugin";
+  /**
+   * What this module binds to — surfaced in the catalog (e.g. "Matrix
+   * homeserver", "Self-hosted email"). Sovereign targets the user owns.
+   */
+  backend?: string;
+  /**
+   * Plugins that need the heavier Electron client (multiple live Matrix syncs
+   * + per-peer sandboxes) flag the upgrade path. The rail marks them.
+   */
+  needsUpgrade?: boolean;
+  /** optional live status dot for the rail (e.g. connected / syncing) */
+  useStatus?: () => PluginStatus;
+}
+
+/** Back-compat alias — modules were formerly all called "plugins". */
+export type MurmurPlugin = MurmurModule;
+
+export type PluginStatus =
+  | { kind: "idle" }
+  | { kind: "active"; label?: string }
+  | { kind: "warn"; label?: string }
+  | { kind: "error"; label?: string };
+
+/** Identity surfaced to every module. Passkey today → Kreivo DID later. */
+export interface Identity {
+  /** display handle (birdbrain-layer name) */
+  handle: string | null;
+  /** opaque local id derived from the passkey credential */
+  localId: string | null;
+  /** did:kreivo:… once on-chain identity is wired */
+  did: string | null;
+  signedIn: boolean;
+}
+
+/** What the host passes to each module panel. */
+export interface PluginContext {
+  identity: Identity;
+  /** the instance this client is bound to (its own birdbrain) */
+  instance: InstanceConfig;
+  /** ask the host to switch the active module */
+  open: (moduleId: string) => void;
+}
+
+/** Configuration of the instance this client speaks for. */
+export interface InstanceConfig {
+  /** e.g. "decent" */
+  slug: string;
+  /** e.g. "Decent" */
+  name: string;
+  /** base origin for this instance's birdbrain API ("" = same-origin/dev proxy) */
+  birdbrainBase: string;
+  /** Matrix homeserver this instance federates over */
+  matrixHomeserver: string;
+}

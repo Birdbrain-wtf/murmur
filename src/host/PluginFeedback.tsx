@@ -1,0 +1,187 @@
+import { useEffect, useRef, useState } from "react";
+import { MessageSquarePlus, X, Check, Bug, Lightbulb, Type } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import type { Identity, InstanceConfig } from "./types";
+import { isTauri } from "./useUpdater";
+
+/**
+ * The host-level "suggest a change" affordance.
+ *
+ * It floats over every module panel (the host owns it, not the plugins — they
+ * each draw their own header, so a uniform surface has to live in the shell).
+ * A suggestion POSTs to `/api/murmur/feedback`, tagged with the active plugin,
+ * the instance, and who sent it, and lands in the append-only backlog ledger.
+ * Fire-and-forget: the panel never blocks on it.
+ */
+
+type Kind = "idea" | "bug" | "copy";
+
+const KINDS: { k: Kind; label: string; Icon: LucideIcon }[] = [
+  { k: "idea", label: "Idea", Icon: Lightbulb },
+  { k: "bug", label: "Bug", Icon: Bug },
+  { k: "copy", label: "Copy", Icon: Type },
+];
+
+let cachedVersion: string | null = null;
+async function appVersion(): Promise<string> {
+  if (cachedVersion !== null) return cachedVersion;
+  if (!isTauri) return (cachedVersion = "web");
+  try {
+    const { getVersion } = await import("@tauri-apps/api/app");
+    cachedVersion = await getVersion();
+  } catch {
+    cachedVersion = "unknown";
+  }
+  return cachedVersion;
+}
+
+export function PluginFeedback({
+  pluginId,
+  pluginTitle,
+  identity,
+  instance,
+}: {
+  pluginId: string;
+  pluginTitle: string;
+  identity: Identity;
+  instance: InstanceConfig;
+}) {
+  const [open, setOpen] = useState(false);
+  const [kind, setKind] = useState<Kind>("idea");
+  const [text, setText] = useState("");
+  const [phase, setPhase] = useState<"edit" | "sending" | "sent" | "error">("edit");
+  const taRef = useRef<HTMLTextAreaElement>(null);
+
+  // Reset everything when the user switches to a different plugin.
+  useEffect(() => {
+    setOpen(false);
+    setText("");
+    setKind("idea");
+    setPhase("edit");
+  }, [pluginId]);
+
+  useEffect(() => {
+    if (open && phase === "edit") taRef.current?.focus();
+  }, [open, phase]);
+
+  async function submit() {
+    const body = text.trim();
+    if (!body || phase === "sending") return;
+    setPhase("sending");
+    try {
+      const base =
+        instance.birdbrainBase?.trim() ||
+        (typeof window !== "undefined" ? window.location.origin : "");
+      const res = await fetch(`${base}/api/murmur/feedback`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plugin: pluginId,
+          pluginTitle,
+          kind,
+          text: body,
+          instance: { slug: instance.slug, name: instance.name },
+          from: identity.handle,
+          fromDid: identity.did,
+          version: await appVersion(),
+          ua: typeof navigator !== "undefined" ? navigator.userAgent : "",
+        }),
+      });
+      if (!res.ok) throw new Error(String(res.status));
+      setPhase("sent");
+      setText("");
+      setTimeout(() => {
+        setOpen(false);
+        setPhase("edit");
+      }, 1800);
+    } catch {
+      setPhase("error");
+    }
+  }
+
+  return (
+    <div className="absolute bottom-4 right-4 z-10 flex flex-col items-end">
+      {open && (
+        <div className="mb-2 w-80 overflow-hidden rounded-[calc(var(--radius)+4px)] border border-[var(--line-strong)] bg-[var(--card)] shadow-[0_20px_60px_rgba(0,0,0,0.18)]">
+          <div className="flex items-center justify-between border-b border-[var(--line)] px-4 py-3">
+            <div className="min-w-0">
+              <div className="font-tight text-sm font-medium">Suggest a change</div>
+              <div className="truncate text-[11px] text-[var(--muted)]">
+                to {pluginTitle}
+              </div>
+            </div>
+            <button
+              onClick={() => setOpen(false)}
+              className="text-[var(--faint)] transition hover:text-[var(--fg)]"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {phase === "sent" ? (
+            <div className="flex items-center gap-2 px-4 py-6 text-sm text-[var(--muted)]">
+              <Check className="h-4 w-4 text-[#34c759]" />
+              Added to the backlog — thank you.
+            </div>
+          ) : (
+            <div className="px-4 py-3.5">
+              <div className="mb-2.5 flex gap-1.5">
+                {KINDS.map(({ k, label, Icon }) => (
+                  <button
+                    key={k}
+                    onClick={() => setKind(k)}
+                    data-active={kind === k}
+                    className="prism-hover flex flex-1 items-center justify-center gap-1.5 rounded-[var(--radius)] border border-[var(--line)] py-1.5 text-xs text-[var(--muted)] transition data-[active=true]:border-[var(--line-strong)] data-[active=true]:bg-[var(--raise)] data-[active=true]:text-[var(--fg)]"
+                  >
+                    <Icon className="h-3.5 w-3.5" /> {label}
+                  </button>
+                ))}
+              </div>
+
+              <textarea
+                ref={taRef}
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.metaKey || e.ctrlKey) && e.key === "Enter") submit();
+                }}
+                placeholder={`What would make ${pluginTitle} better?`}
+                rows={3}
+                className="w-full resize-y rounded-[var(--radius)] border border-[var(--line)] bg-[var(--bg)] px-3 py-2 text-sm outline-none placeholder:text-[var(--faint)] focus:border-[var(--line-strong)]"
+              />
+
+              {phase === "error" && (
+                <p className="mt-1.5 text-[11px] text-[#c1271d]">
+                  Couldn’t send — check your connection and try again.
+                </p>
+              )}
+
+              <div className="mt-2.5 flex items-center justify-between">
+                <span className="font-mono text-[10px] text-[var(--faint)]">
+                  goes to the {instance.name} backlog
+                </span>
+                <button
+                  onClick={submit}
+                  disabled={!text.trim() || phase === "sending"}
+                  className="inline-flex items-center gap-1.5 rounded-[var(--radius)] px-3.5 py-1.5 text-xs font-medium text-white disabled:opacity-40"
+                  style={{ background: "var(--spectrum)" }}
+                >
+                  {phase === "sending" ? "Sending…" : "Send"}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <button
+        onClick={() => setOpen((o) => !o)}
+        title={`Suggest a change to ${pluginTitle}`}
+        className="prism-hover flex items-center gap-1.5 rounded-full border border-[var(--line-strong)] bg-[var(--card)] px-3 py-1.5 text-xs font-medium text-[var(--muted)] shadow-[0_6px_20px_rgba(0,0,0,0.08)] transition hover:text-[var(--fg)]"
+      >
+        <MessageSquarePlus className="h-3.5 w-3.5" />
+        Suggest
+      </button>
+    </div>
+  );
+}
