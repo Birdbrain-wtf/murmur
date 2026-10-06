@@ -1,0 +1,136 @@
+@import "tailwindcss";
+
+/* NOTE: this project is its own git repo on purpose. The workspace root
+   .gitignore is `*`, which would otherwise hide every source file from
+   Tailwind v4's content scanner (it respects .gitignore). A local `.git`
+   boundary stops the scanner reading the parent ignore, so auto-detection
+   works. Keep the `.git` here — without it, utilities won't generate. */
+
+/*
+  Prism design language — "white is the resting state, colour is the
+  consequence of interaction." The app rests in near-total white; the
+  spectrum only appears through hover, focus, activity and selection.
+*/
+
+:root {
+  --bg: #ffffff;
+  --fg: #0a0a0a;
+  --muted: #6b6b6b;
+  --faint: #9a9a9a;
+  --line: #ececec;
+  --line-strong: #d8d8d8;
+  --card: #ffffff;
+  --raise: #fafafa;
+
+  /* the spectrum — only deployed on interaction */
+  --spectrum: linear-gradient(
+    90deg,
+    #ff3b30 0%,
+    #ff9500 17%,
+    #ffcc00 33%,
+    #34c759 50%,
+    #00c7be 66%,
+    #007aff 83%,
+    #af52de 100%
+  );
+  /* the single accent — focus rings, selection, primary affordances. A skin
+     overrides this (and --spectrum) to rebrand the client. */
+  --accent: #007aff;
+  --radius: 10px;
+  --font-ui: "Inter", system-ui, sans-serif;
+  --font-tight: "Inter Tight", "Inter", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --font-serif: "Newsreader", Georgia, serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  font-weight: 400;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* thin spectral bar — the only resting colour, hairline-quiet */
+.spectrum-bar {
+  height: 2px;
+  background: var(--spectrum);
+  opacity: 0.9;
+}
+
+/* a surface that reveals spectrum on hover */
+.prism-hover {
+  position: relative;
+  transition: color 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+}
+.prism-hover::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--spectrum);
+  opacity: 0;
+  transform: scaleX(0.4);
+  transform-origin: left;
+  transition: opacity 0.2s ease, transform 0.25s ease;
+}
+.prism-hover:hover::after,
+.prism-hover[data-active="true"]::after {
+  opacity: 1;
+  transform: scaleX(1);
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+.font-tight {
+  font-family: var(--font-tight);
+}
+.font-serif {
+  font-family: var(--font-serif);
+}
+
+/* quiet scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 8px;
+}
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+.pulse-dot {
+  animation: pulse-dot 1.6s ease-in-out infinite;
+}
