@@ -17,7 +17,11 @@ Everything else is a plugin you add from the catalogue: ask the group's memory, 
 
 One codebase builds more than one app. This repository builds **Murmur**, bound to Birdbrain. An organisation can build its own edition from the same code, with its own name, look and home address (`src/edition.ts`), the same way an organisation runs its own profile on top of the Seeds rules. Decent Partners' edition is called Decent.
 
-## Run it
+## Download
+
+For a Mac: **[birdbrain.wtf/murmur](https://birdbrain.wtf/murmur)**. Each tagged version is built here on GitHub's own Mac machines (`.github/workflows/release.yml`) and attached to [Releases](https://github.com/Birdbrain-wtf/murmur/releases). It is not yet notarised by Apple, so macOS asks once before the first open; the download page shows the step.
+
+## Run it from source
 
 ```bash
 bun install
@@ -32,7 +36,7 @@ bun tauri build        # the desktop app (needs Rust and, on a Mac, Xcode comman
 
 ## Not yet
 
-- Releases. Murmur has no signed update channel yet. When it has one, the signing key will be Birdbrain's.
+- Updates inside the app. Murmur has no signed update channel yet, so a new version is a new download. When it has one, the signing key will be Birdbrain's.
 - Signing in with a passkey from inside the app. Today that happens on [birdbrain.wtf](https://birdbrain.wtf).
 - Connecting your own server, so notes and the group's memory live with you rather than with us.
 

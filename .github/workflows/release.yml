@@ -1,0 +1,55 @@
+name: release
+
+# Builds Murmur for macOS (Apple silicon and Intel in one app) on GitHub's own
+# Mac runners and attaches it to a GitHub Release. Trigger by pushing a tag:
+#   git tag v0.3.0 && git push origin v0.3.0
+#
+# The app is ad-hoc signed, not notarised: Birdbrain has no Apple developer
+# certificate yet, so macOS asks once before the first open. The download page
+# (birdbrain.wtf/murmur) explains the step. The fixed asset name
+# Murmur-mac.dmg is what releases/latest/download/Murmur-mac.dmg resolves to,
+# so the download link never changes between versions.
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  macos:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Install frontend deps
+        run: bun install --frozen-lockfile
+
+      - name: Build the app
+        run: >
+          bunx tauri build --target universal-apple-darwin --bundles dmg
+          --config '{"bundle":{"macOS":{"signingIdentity":"-"}}}'
+
+      - name: Name the download
+        run: |
+          cp src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg Murmur-mac.dmg
+          shasum -a 256 Murmur-mac.dmg > Murmur-mac.dmg.sha256
+          cat Murmur-mac.dmg.sha256
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: >
+          gh release create "${GITHUB_REF_NAME}" Murmur-mac.dmg Murmur-mac.dmg.sha256
+          --title "Murmur ${GITHUB_REF_NAME}"
+          --notes "Murmur for macOS (Apple silicon and Intel). Ad-hoc signed, not notarised: see https://birdbrain.wtf/murmur for the one-time step to open it."
