@@ -1,6 +1,6 @@
 [package]
 name = "murmur"
-version = "0.3.1"
+version = "0.4.1"
 description = "Murmur and its editions: a plugin host over Matrix, Seeds and the group's memory"
 authors = ["Birdbrain"]
 edition = "2021"
@@ -25,6 +25,40 @@ serde_json = "1"
 # the plugin must not be compiled into iOS/Android builds.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-updater = "2"
+# Keep a copy (ADR 0068, step 2): check the node program against Birdbrain's key, unpack it.
+minisign-verify = "0.2"
+flate2 = "1"
+base64 = "0.22"
+
+# Secrets and API keys live in the system's own secure store (the macOS Keychain,
+# Windows Credential Manager), never in the webview's storage. See src/lib/secrets.ts.
+# The light client (ADR 0068): checks the chain's finality proofs on this device. No
+# wasmtime: smoldot's own interpreter runs the runtime calls a light client needs, and
+# wasmtime would add megabytes. GPL-3.0 with the Classpath exception, which allows
+# linking it into the Apache-2.0 app.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies.smoldot-light]
+version = "2.1.0"
+default-features = false
+features = ["std"]
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies.smol]
+version = "2"
+# Keep a copy (ADR 0068, step 2): fetch the node program, check it against Birdbrain's
+# release key, unpack it. All four are already in the tree through the updater.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies.reqwest]
+version = "0.13"
+default-features = false
+features = ["blocking", "json", "rustls-no-provider"]
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies.rustls]
+version = "0.23"
+default-features = false
+features = ["ring"]
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", features = ["windows-native"] }
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", features = ["linux-native"] }
 
 [profile.release]
 panic = "abort"

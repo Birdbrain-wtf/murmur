@@ -32,7 +32,7 @@ const isMobileWebview =
   typeof navigator !== "undefined" &&
   /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 
-// Murmur has no signed release channel of its own yet, so it never polls ours.
+// Every edition has its own signed channel; an edition can still opt out here.
 const canSelfUpdate = isTauri && !isMobileWebview && edition.selfUpdate;
 
 export function useUpdater() {

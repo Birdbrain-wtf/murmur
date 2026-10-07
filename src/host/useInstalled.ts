@@ -5,14 +5,34 @@ import { DEFAULT_INSTALLED } from "./registry";
 // clients pick up the new defaults rather than a stale install list.
 const KEY = "murmur.installed.v2";
 
+// Plugins an edition has offered to this install, so a plugin added to the
+// edition later is installed once on update and never forced back after the
+// member removes it. Installs from before this list existed have seen every
+// default except the ones named here.
+const SEEN = "murmur.installed.seen.v1";
+const ADDED_SINCE = ["agent", "invite"];
+
 function load(): string[] {
+  let list: string[] | null = null;
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw) as string[];
+    if (raw) list = JSON.parse(raw) as string[];
   } catch {
     /* ignore */
   }
-  return [...DEFAULT_INSTALLED];
+  if (!list) {
+    localStorage.setItem(SEEN, JSON.stringify(DEFAULT_INSTALLED));
+    return [...DEFAULT_INSTALLED];
+  }
+  let seen: string[];
+  try {
+    seen = JSON.parse(localStorage.getItem(SEEN) || "null") ?? DEFAULT_INSTALLED.filter((id) => !ADDED_SINCE.includes(id));
+  } catch {
+    seen = [];
+  }
+  const fresh = DEFAULT_INSTALLED.filter((id) => !seen.includes(id) && !list!.includes(id));
+  localStorage.setItem(SEEN, JSON.stringify([...new Set([...seen, ...DEFAULT_INSTALLED])]));
+  return [...list, ...fresh];
 }
 
 /**

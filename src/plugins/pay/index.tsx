@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   Wallet,
-  Loader2,
   CreditCard,
   Plus,
   RefreshCw,
@@ -23,6 +22,24 @@ import {
   type WalletAccount,
   type WalletTx,
 } from "../../lib/wallet";
+import {
+  Button,
+  Card,
+  Empty,
+  Facts,
+  Field,
+  Gate,
+  List,
+  Notice,
+  Page,
+  PageBody,
+  PageHeader,
+  Row,
+  Section,
+  Status,
+  Waiting,
+  inputClass,
+} from "../../ui";
 
 function Panel({ instance, identity }: PluginContext) {
   // Wallet calls share the instance's Decent space origin (same as birdbrain).
@@ -112,97 +129,71 @@ function Panel({ instance, identity }: PluginContext) {
     }
   }
 
-  return (
-    <div className="flex h-full flex-col">
-      <header className="border-b border-[var(--line)] px-8 pt-7 pb-5">
-        <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
-          <Wallet className="h-3.5 w-3.5" />
-          pay
-        </div>
-        <h1 className="font-tight mt-2 text-2xl font-medium">Decent Pay</h1>
-        <p className="mt-1 max-w-xl text-sm text-[var(--muted)]">
-          A programmable stablecoin wallet for the flock — balances, a card and
-          payments, on Bloque. Creators get paid here.
-        </p>
-      </header>
+  const shownAlias = alias.trim().replace(/^@/, "");
 
-      {/* connect bar */}
-      <div className="px-8 pt-6">
-        <form
-          onSubmit={connect}
-          className="prism-hover flex items-center gap-3 rounded-[var(--radius)] border border-[var(--line-strong)] bg-[var(--card)] px-4 py-3"
-          data-active={phase === "loading"}
-        >
-          {phase === "loading" ? (
-            <Loader2 className="h-4 w-4 animate-spin text-[var(--muted)]" />
-          ) : (
-            <Coins className="h-4 w-4 text-[var(--muted)]" />
-          )}
-          <span className="font-mono text-[13px] text-[var(--faint)]">alias</span>
+  // The alias form: inside the gate until a wallet is connected, then a quiet
+  // bar above it (so the alias can still be changed or the balances refreshed).
+  const aliasForm = (
+    <form onSubmit={connect} className="flex items-end gap-2" data-active={phase === "loading"}>
+      <div className="min-w-0 flex-1">
+        <Field label="Alias" hint="The handle your wallet is under.">
           <input
             value={alias}
             onChange={(e) => setAlias(e.target.value)}
-            placeholder="your-decent-handle"
-            className="flex-1 bg-transparent text-[15px] outline-none placeholder:text-[var(--faint)]"
+            placeholder="alice"
+            className={inputClass}
           />
-          <button
-            type="submit"
-            disabled={phase === "loading" || !alias.trim()}
-            className="prism-hover flex items-center gap-1.5 rounded-full border border-[var(--line-strong)] px-3 py-1.5 text-xs font-medium disabled:opacity-50"
-          >
-            {phase === "ready" ? (
-              <>
-                <RefreshCw className="h-3.5 w-3.5" /> refresh
-              </>
-            ) : (
-              <>connect</>
-            )}
-          </button>
-        </form>
+        </Field>
       </div>
+      <Button
+        type="submit"
+        variant={phase === "ready" ? "secondary" : "primary"}
+        size="md"
+        icon={phase === "ready" ? RefreshCw : undefined}
+        busy={phase === "loading"}
+        disabled={!alias.trim()}
+      >
+        {phase === "ready" ? "Refresh" : "Connect"}
+      </Button>
+    </form>
+  );
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
-        {error && (
-          <div className="mb-4 rounded-[var(--radius)] border border-[#ff3b30]/30 bg-[#ff3b30]/5 px-4 py-3 text-sm text-[#c1271d]">
-            Decent Pay — {error}
-          </div>
+  return (
+    <Page>
+      <PageHeader
+        icon={Wallet}
+        eyebrow="pay"
+        title="Your wallet"
+        lede="Your balances, a card and your payments, through Decent Pay."
+        actions={phase === "ready" && shownAlias ? <Status tone="ok">{shownAlias}</Status> : undefined}
+      />
+      <PageBody>
+        {phase === "ready" ? (
+          <Card tone="quiet">{aliasForm}</Card>
+        ) : (
+          <Gate icon={Coins} title="Connect your wallet">
+            <p>Type your alias to see your balances, your card and your payments.</p>
+            <div className="text-[var(--fg)]">{aliasForm}</div>
+          </Gate>
         )}
 
-        {phase === "idle" && !error && (
-          <div className="text-sm text-[var(--muted)]">
-            Connect with your Decent alias to see your wallet.
-          </div>
-        )}
+        {error && <Notice tone="danger">Decent Pay: {error}</Notice>}
 
         {phase === "ready" && accounts && accounts.length === 0 && (
-          <div className="rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] px-5 py-6 text-center">
-            <CreditCard className="mx-auto h-6 w-6 text-[var(--faint)]" />
-            <div className="font-tight mt-3 text-base font-medium">
-              No wallet yet
-            </div>
-            <p className="mx-auto mt-1 max-w-sm text-sm text-[var(--muted)]">
-              Create a Decent wallet for{" "}
-              <span className="font-mono text-[var(--fg)]">
-                {alias.trim().replace(/^@/, "")}
-              </span>{" "}
-              — a stablecoin pocket and a linked card on Bloque.
+          <Gate
+            icon={CreditCard}
+            title="No wallet yet"
+            action={
+              <Button variant="primary" size="md" icon={Plus} busy={creating} onClick={createWallet}>
+                {creating ? "Creating" : "Create wallet"}
+              </Button>
+            }
+          >
+            <p>
+              Create a wallet for <span className="font-mono text-[var(--fg)]">{shownAlias}</span>: a
+              pocket for your balance and a card linked to it.
             </p>
-            <button
-              onClick={createWallet}
-              disabled={creating}
-              className="prism-hover mt-4 inline-flex items-center gap-2 rounded-[var(--radius)] border border-[var(--line-strong)] px-4 py-2 text-sm font-medium disabled:opacity-50"
-            >
-              {creating ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> creating…
-                </>
-              ) : (
-                <>
-                  <Plus className="h-4 w-4" /> Create wallet
-                </>
-              )}
-            </button>
-          </div>
+          </Gate>
         )}
 
         {accounts &&
@@ -211,176 +202,134 @@ function Panel({ instance, identity }: PluginContext) {
             const cards = accounts.filter(isCardAccount);
             const others = accounts.filter((a) => !isCardAccount(a));
             return (
-              <div className="flex flex-col gap-6">
-                {/* Card mediums — the branded Decent card face. */}
-                {cards.map((a, i) => {
-                  const urn = accountUrn(a);
-                  const bal = accountBalance(a);
-                  const info = cardInfo(a);
-                  const name = accountName(a) || "Decent Card";
-                  const isOpen = urn != null && urn === selected;
-                  const isRevealed = urn != null && urn === revealUrn;
-                  const kind =
-                    info?.card_type === "VIRTUAL" ? "Virtual debit" : "Debit";
-                  return (
-                    <div key={urn ?? `card-${i}`} className="flex flex-col">
-                      <button
-                        onClick={() => openAccount(a)}
-                        data-active={isOpen}
-                        aria-label={`${name} — ${info?.card_provider ?? "VISA"} ${kind}`}
-                        className="prism-hover flex flex-col items-start rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] px-4 py-4 text-left data-[active=true]:border-[var(--line-strong)]"
-                      >
-                        <div className="flex w-full items-center justify-between gap-2">
-                          <div className="flex min-w-0 items-center gap-2">
-                            <CreditCard className="h-4 w-4 shrink-0 text-[var(--muted)]" />
-                            <span className="font-tight truncate text-sm font-medium">
-                              {name}
-                            </span>
+              <>
+                {cards.length > 0 && (
+                  <Section label="Cards" icon={CreditCard}>
+                    <div className="space-y-4">
+                      {cards.map((a, i) => {
+                        const urn = accountUrn(a);
+                        const bal = accountBalance(a);
+                        const info = cardInfo(a);
+                        const name = accountName(a) || "Decent Card";
+                        const isOpen = urn != null && urn === selected;
+                        const isRevealed = urn != null && urn === revealUrn;
+                        const kind = info?.card_type === "VIRTUAL" ? "Virtual debit" : "Debit";
+                        const active = info?.card_status?.toUpperCase() === "ACTIVE";
+                        return (
+                          <div key={urn ?? `card-${i}`}>
+                            <button
+                              onClick={() => openAccount(a)}
+                              data-active={isOpen}
+                              aria-label={`${name}, ${info?.card_provider ?? "VISA"} ${kind}`}
+                              className="prism-hover block w-full rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] px-5 py-4 text-left data-[active=true]:border-[var(--line-strong)]"
+                            >
+                              <Row
+                                icon={CreditCard}
+                                title={name}
+                                status={
+                                  info?.card_status ? (
+                                    <Status tone={active ? "ok" : "idle"}>{info.card_status.toLowerCase()}</Status>
+                                  ) : undefined
+                                }
+                                detail={kind}
+                              />
+                              <div className="font-tight mt-3 text-2xl font-medium">{bal ?? "–"}</div>
+                              <div className="mt-3">
+                                <Facts
+                                  items={[
+                                    ["card", `···· ${info?.card_last_four ?? "····"}`],
+                                    ["network", info?.card_provider ?? "VISA"],
+                                  ]}
+                                />
+                              </div>
+                            </button>
+                            <div className="mt-3 flex justify-end">
+                              <Button icon={isRevealed ? EyeOff : Eye} onClick={() => toggleReveal(a)}>
+                                {isRevealed ? "Hide card" : "Reveal card"}
+                              </Button>
+                            </div>
+                            {isRevealed && (
+                              <div className="mt-3 overflow-hidden rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)]">
+                                {revealLoading ? (
+                                  <div className="px-5 py-6">
+                                    <Waiting>Loading the card</Waiting>
+                                  </div>
+                                ) : revealUrl ? (
+                                  <iframe
+                                    src={revealUrl}
+                                    title="Card details"
+                                    className="block h-[230px] w-full border-0 bg-white"
+                                  />
+                                ) : (
+                                  <div className="px-5 py-6">
+                                    <Notice>Card details are not available right now.</Notice>
+                                  </div>
+                                )}
+                              </div>
+                            )}
                           </div>
-                          <span className="font-mono shrink-0 text-[10px] uppercase tracking-[0.18em] text-[var(--faint)]">
-                            {kind}
-                          </span>
-                        </div>
-                        <div className="font-tight mt-3 text-2xl font-medium">
-                          {bal ?? "—"}
-                        </div>
-                        <div className="font-mono mt-2 flex w-full flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-[var(--muted)]">
-                          <span className="tracking-[0.18em]">
-                            ···· {info?.card_last_four ?? "····"}
-                          </span>
-                          <span className="text-[var(--faint)]">·</span>
-                          <span>{info?.card_provider ?? "VISA"}</span>
-                          {info?.card_status && (
-                            <>
-                              <span className="text-[var(--faint)]">·</span>
-                              <span className="uppercase tracking-[0.18em]">
-                                {info.card_status.toLowerCase()}
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </button>
-                      <div className="mt-3 flex justify-end">
-                        <button
-                          onClick={() => toggleReveal(a)}
-                          className="prism-hover flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--line-strong)] px-3 py-1.5 text-xs font-medium"
-                        >
-                          {isRevealed ? (
-                            <>
-                              <EyeOff className="h-3.5 w-3.5" /> Hide
-                            </>
-                          ) : (
-                            <>
-                              <Eye className="h-3.5 w-3.5" /> Reveal card
-                            </>
-                          )}
-                        </button>
-                      </div>
-                      {isRevealed && (
-                        <div className="mt-3 overflow-hidden rounded-xl border border-[var(--line)] bg-[var(--card)]">
-                          {revealLoading ? (
-                            <div className="flex items-center gap-2 px-4 py-6 text-sm text-[var(--muted)]">
-                              <Loader2 className="h-4 w-4 animate-spin" /> loading
-                              card…
-                            </div>
-                          ) : revealUrl ? (
-                            <iframe
-                              src={revealUrl}
-                              title="Card details"
-                              className="block h-[230px] w-full border-0 bg-white"
-                            />
-                          ) : (
-                            <div className="px-4 py-6 text-sm text-[var(--muted)]">
-                              Card details unavailable right now.
-                            </div>
-                          )}
-                        </div>
-                      )}
+                        );
+                      })}
                     </div>
-                  );
-                })}
-
-                {/* Non-card accounts (treasury / virtual pockets). */}
-                {others.length > 0 && (
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    {others.map((a, i) => {
-                      const urn = accountUrn(a);
-                      const bal = accountBalance(a);
-                      const name = accountName(a) || "Wallet";
-                      return (
-                        <button
-                          key={urn ?? `acct-${i}`}
-                          onClick={() => openAccount(a)}
-                          data-active={urn != null && urn === selected}
-                          className="prism-hover flex flex-col items-start rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] px-4 py-4 text-left data-[active=true]:border-[var(--line-strong)]"
-                        >
-                          <div className="flex w-full items-center gap-2">
-                            <Wallet className="h-4 w-4 text-[var(--muted)]" />
-                            <span className="font-tight text-sm font-medium">
-                              {name}
-                            </span>
-                          </div>
-                          <div className="font-tight mt-3 text-2xl font-medium">
-                            {bal ?? "—"}
-                          </div>
-                          {urn && (
-                            <div className="font-mono mt-2 w-full truncate text-[10px] text-[var(--faint)]">
-                              {urn}
-                            </div>
-                          )}
-                        </button>
-                      );
-                    })}
-                  </div>
+                  </Section>
                 )}
-              </div>
+
+                {others.length > 0 && (
+                  <Section label="Accounts" icon={Wallet}>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {others.map((a, i) => {
+                        const urn = accountUrn(a);
+                        const bal = accountBalance(a);
+                        const name = accountName(a) || "Wallet";
+                        return (
+                          <button
+                            key={urn ?? `acct-${i}`}
+                            onClick={() => openAccount(a)}
+                            data-active={urn != null && urn === selected}
+                            className="prism-hover block w-full rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] px-5 py-4 text-left data-[active=true]:border-[var(--line-strong)]"
+                          >
+                            <Row icon={Wallet} title={name} />
+                            <div className="font-tight mt-3 text-2xl font-medium">{bal ?? "–"}</div>
+                            {urn && (
+                              <div className="font-mono mt-2 w-full truncate text-[10px] text-[var(--faint)]">{urn}</div>
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </Section>
+                )}
+              </>
             );
           })()}
 
         {selected && (
-          <div className="mt-6">
-            <div className="mb-2 flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
-              <RefreshCw className="h-3 w-3" />
-              transactions
-            </div>
-            {txLoading && (
-              <div className="flex items-center gap-2 text-sm text-[var(--muted)]">
-                <Loader2 className="h-4 w-4 animate-spin" /> loading…
-              </div>
-            )}
-            {!txLoading && txs && txs.length === 0 && (
-              <div className="text-sm text-[var(--muted)]">No movements yet.</div>
-            )}
-            <div className="flex flex-col gap-1.5">
-              {!txLoading &&
-                txs?.map((t, i) => (
-                  <div
+          <Section label="Payments" icon={RefreshCw}>
+            {txLoading && <Waiting>Loading payments</Waiting>}
+            {!txLoading && txs && txs.length === 0 && <Empty>No payments yet.</Empty>}
+            {!txLoading && txs && txs.length > 0 && (
+              <List>
+                {txs.map((t, i) => (
+                  <Row
                     key={t.id ?? i}
-                    className="flex items-center gap-3 rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] px-4 py-2.5"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-sm">
-                        {t.description || t.direction || t.status || "movement"}
-                      </div>
-                      {t.createdAt && (
-                        <div className="font-mono text-[10px] text-[var(--faint)]">
-                          {fmtDate(t.createdAt)}
-                        </div>
-                      )}
-                    </div>
-                    {t.amount != null && (
-                      <div className="font-mono text-sm">
-                        {String(t.amount)}
-                        {t.currency ? ` ${t.currency}` : ""}
-                      </div>
-                    )}
-                  </div>
+                    title={t.description || t.direction || t.status || "Payment"}
+                    detail={t.createdAt ? <span className="font-mono text-[11px]">{fmtDate(t.createdAt)}</span> : undefined}
+                    action={
+                      t.amount != null ? (
+                        <span className="font-mono text-sm">
+                          {String(t.amount)}
+                          {t.currency ? ` ${t.currency}` : ""}
+                        </span>
+                      ) : undefined
+                    }
+                  />
                 ))}
-            </div>
-          </div>
+              </List>
+            )}
+          </Section>
         )}
-      </div>
-    </div>
+      </PageBody>
+    </Page>
   );
 }
 
@@ -399,10 +348,10 @@ function fmtDate(s: string): string {
 export const payPlugin: MurmurPlugin = {
   id: "pay",
   title: "Pay",
-  tagline: "Your Decent wallet — balances, card & payments (Bloque)",
+  tagline: "Your wallet: balances, a card and payments",
   icon: Wallet,
   order: 25,
   kind: "plugin",
-  backend: "Bloque · Decent Pay",
+  backend: "Decent Pay",
   Panel,
 };

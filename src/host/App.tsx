@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Plus, X, Check, Fingerprint, ArrowUpRight } from "lucide-react";
+import { Plus, X, Fingerprint, ArrowUpRight } from "lucide-react";
 import type { MurmurModule } from "./types";
 import {
   coreModules,
@@ -14,6 +14,7 @@ import { useUpdater } from "./useUpdater";
 import { UpdateBanner } from "./UpdateBanner";
 import { PluginFeedback } from "./PluginFeedback";
 import { edition } from "../edition";
+import { Button, Status } from "../ui";
 
 const UPGRADE_DOT = "#af52de";
 
@@ -110,8 +111,8 @@ export default function App() {
               onClick={() => open(identityMod.id)}
               title={
                 identity.signedIn
-                  ? `Signed in as ${identity.handle}`
-                  : `Sign in with ${edition.instance.name}`
+                  ? `Profile: signed in as ${identity.handle}`
+                  : `Profile: sign in to ${edition.productName}`
               }
               data-active={active.id === identityMod.id}
               className="prism-hover flex h-11 w-11 items-center justify-center rounded-full border border-[var(--line-strong)] text-[var(--muted)] transition hover:text-[var(--fg)] data-[active=true]:text-[var(--fg)]"
@@ -172,7 +173,7 @@ function RailButton({
   return (
     <button
       onClick={() => onClick(mod.id)}
-      title={`${mod.title} — ${mod.tagline}`}
+      title={`${mod.title}: ${mod.tagline}`}
       data-active={active}
       className="prism-hover group relative flex h-11 w-11 items-center justify-center rounded-[var(--radius)] text-[var(--muted)] transition hover:bg-[var(--raise)] data-[active=true]:bg-[var(--raise)] data-[active=true]:text-[var(--fg)]"
     >
@@ -215,8 +216,8 @@ function Catalog({
           <div>
             <div className="font-tight text-lg font-medium">Plugins</div>
             <p className="text-xs text-[var(--muted)]">
-              {installed.length} installed · add capabilities as their backends
-              come online
+              {installed.length} of {pluginCatalog.length} added. Notes, Settings
+              and Profile are always here.
             </p>
           </div>
           <button
@@ -244,59 +245,31 @@ function Catalog({
                     <span className="font-tight text-sm font-medium">
                       {p.title}
                     </span>
-                    {p.needsUpgrade && (
-                      <span
-                        className="font-mono rounded px-1.5 py-0.5 text-[9px] uppercase tracking-wider text-white"
-                        style={{ background: UPGRADE_DOT }}
-                      >
-                        electron
-                      </span>
-                    )}
+                    {p.needsUpgrade && <Status tone="warn">needs the larger app</Status>}
                   </div>
                   <div className="mt-0.5 truncate text-xs text-[var(--muted)]">
                     {p.tagline}
                   </div>
-                  {p.backend && (
-                    <div className="font-mono mt-1 text-[10px] text-[var(--faint)]">
-                      {p.backend}
-                    </div>
-                  )}
                 </div>
                 {on ? (
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => onOpen(p.id)}
-                      className="prism-hover flex items-center gap-1 rounded-full border border-[var(--line-strong)] px-3 py-1 text-xs text-[var(--fg)]"
-                    >
-                      open <ArrowUpRight className="h-3 w-3" />
-                    </button>
-                    <button
-                      onClick={() => uninstall(p.id)}
-                      title="Remove"
-                      className="text-[var(--faint)] hover:text-[#c1271d]"
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
+                  <div className="flex items-center gap-1">
+                    <Button variant="quiet" onClick={() => uninstall(p.id)} title={`Remove ${p.title}`}>
+                      Remove
+                    </Button>
+                    <Button onClick={() => onOpen(p.id)} trailing={ArrowUpRight}>
+                      Open
+                    </Button>
                   </div>
                 ) : (
-                  <button
-                    onClick={() => install(p.id)}
-                    className="prism-hover flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--line-strong)] px-3 py-1.5 text-xs font-medium"
-                  >
-                    <Check className="h-3.5 w-3.5" /> add
-                  </button>
+                  <Button variant="primary" icon={Plus} onClick={() => install(p.id)}>
+                    Add
+                  </Button>
                 )}
               </article>
             );
           })}
         </div>
 
-        <div className="border-t border-[var(--line)] px-6 py-3">
-          <p className="font-mono text-[10px] leading-relaxed text-[var(--faint)]">
-            identity &amp; notes are core — always present. everything else is a
-            plugin you add over time.
-          </p>
-        </div>
       </div>
     </div>
   );

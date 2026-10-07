@@ -3,6 +3,7 @@ import { MessageSquarePlus, X, Check, Bug, Lightbulb, Type } from "lucide-react"
 import type { LucideIcon } from "lucide-react";
 import type { Identity, InstanceConfig } from "./types";
 import { isTauri } from "./useUpdater";
+import { Button } from "../ui";
 
 /**
  * The host-level "suggest a change" affordance.
@@ -120,8 +121,8 @@ export function PluginFeedback({
 
           {phase === "sent" ? (
             <div className="flex items-center gap-2 px-4 py-6 text-sm text-[var(--muted)]">
-              <Check className="h-4 w-4 text-[#34c759]" />
-              Added to the backlog — thank you.
+              <Check className="h-4 w-4 text-[var(--ok)]" />
+              Sent. Thank you.
             </div>
           ) : (
             <div className="px-4 py-3.5">
@@ -151,23 +152,18 @@ export function PluginFeedback({
               />
 
               {phase === "error" && (
-                <p className="mt-1.5 text-[11px] text-[#c1271d]">
-                  Couldn’t send — check your connection and try again.
+                <p className="mt-1.5 text-[11px] text-[var(--danger)]">
+                  Couldn't send. Check your connection and try again.
                 </p>
               )}
 
               <div className="mt-2.5 flex items-center justify-between">
-                <span className="font-mono text-[10px] text-[var(--faint)]">
-                  goes to the {instance.name} backlog
+                <span className="text-[11px] text-[var(--faint)]">
+                  Goes to the people who build {instance.name}'s app.
                 </span>
-                <button
-                  onClick={submit}
-                  disabled={!text.trim() || phase === "sending"}
-                  className="inline-flex items-center gap-1.5 rounded-[var(--radius)] px-3.5 py-1.5 text-xs font-medium text-white disabled:opacity-40"
-                  style={{ background: "var(--spectrum)" }}
-                >
-                  {phase === "sending" ? "Sending…" : "Send"}
-                </button>
+                <Button variant="primary" onClick={submit} disabled={!text.trim()} busy={phase === "sending"}>
+                  Send
+                </Button>
               </div>
             </div>
           )}
@@ -177,7 +173,7 @@ export function PluginFeedback({
       <button
         onClick={() => setOpen((o) => !o)}
         title={`Suggest a change to ${pluginTitle}`}
-        className="prism-hover flex items-center gap-1.5 rounded-full border border-[var(--line-strong)] bg-[var(--card)] px-3 py-1.5 text-xs font-medium text-[var(--muted)] shadow-[0_6px_20px_rgba(0,0,0,0.08)] transition hover:text-[var(--fg)]"
+        className="prism-hover flex items-center gap-1.5 rounded-[var(--radius)] border border-[var(--line-strong)] bg-[var(--card)] px-3 py-1.5 text-xs font-medium text-[var(--muted)] shadow-[0_6px_20px_rgba(0,0,0,0.08)] transition hover:text-[var(--fg)]"
       >
         <MessageSquarePlus className="h-3.5 w-3.5" />
         Suggest

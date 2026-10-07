@@ -96,13 +96,14 @@ Your Panel receives \`PluginContext\`: { identity, instance, open }.
 - Work on a worktree off develop:
   \`git worktree add ../murmur-${id} -b feat/${id} develop\`
 
-## Styling — match the existing plugins exactly
-- CSS vars: --line, --line-strong, --faint, --muted, --fg, --card, --raise,
-  --radius, --spectrum. Fonts: font-tight (headings), font-mono, font-serif.
-- Hover affordance: \`className="prism-hover"\`. Icons: lucide-react only.
-- Header pattern: eyebrow (icon + lowercase id, uppercase tracking) → h1
-  (font-tight) → tagline \`<p className="text-[var(--muted)]">\`.
-- Scroll body: \`<div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">\`.
+## Styling: use the kit in src/ui, never hand-roll
+- Every panel is Page → PageHeader (icon, eyebrow, title, lede, actions) →
+  PageBody (width read | wide | full). Sections, Card, List/Row, Button
+  (primary | secondary | quiet | danger), Field + inputClass, Gate for
+  sign-in or connect states, Status for state at rest, Notice for errors.
+- Prism: white at rest, colour on interaction. No filled or gradient buttons,
+  no coloured pills. Colours come from tokens (--danger, --ok, --warn, --accent).
+- Copy: British English, sentence case, no em-dashes, no infrastructure names.
 
 ## Definition of done
 \`src/plugins/${id}/index.tsx\` exports a MurmurModule with kind:"plugin", renders

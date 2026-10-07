@@ -37,31 +37,29 @@ const exportName =
 
 const tpl = `import { Puzzle } from "lucide-react";
 import type { MurmurModule, PluginContext } from "../../host/types";
+import { Page, PageHeader, PageBody, Card } from "../../ui";
 
 /**
- * ${title} plugin — TODO: describe what this binds to and does.
+ * ${title} plugin: TODO describe what this binds to and does.
+ * Draw everything from src/ui (Page, PageHeader, PageBody, Section, Card,
+ * Row, Button, Field, Gate, Status). Don't hand-roll headers or buttons.
  */
 function Panel({ identity }: PluginContext) {
   return (
-    <div className="flex h-full flex-col">
-      <header className="border-b border-[var(--line)] px-8 pt-7 pb-5">
-        <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
-          <Puzzle className="h-3.5 w-3.5" />
-          ${id}
-        </div>
-        <h1 className="font-tight mt-2 text-2xl font-medium">${title}</h1>
-        <p className="mt-1 max-w-xl text-sm text-[var(--muted)]">
-          New plugin scaffold. Replace this panel with the real surface.
-        </p>
-      </header>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
-        <div className="max-w-xl rounded-[var(--radius)] border border-dashed border-[var(--line-strong)] bg-[var(--raise)] px-5 py-4 text-[13px] leading-relaxed text-[var(--muted)]">
+    <Page>
+      <PageHeader
+        icon={Puzzle}
+        eyebrow="${id}"
+        title="${title}"
+        lede="New plugin scaffold. Replace this panel with the real surface."
+      />
+      <PageBody>
+        <Card tone="dashed">
           Wire up <span className="font-mono">${id}</span> here.
           {identity.handle ? \` Signed in as \${identity.handle}.\` : ""}
-        </div>
-      </div>
-    </div>
+        </Card>
+      </PageBody>
+    </Page>
   );
 }
 
