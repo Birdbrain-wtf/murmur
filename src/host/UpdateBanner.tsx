@@ -1,5 +1,6 @@
 import { Download, Loader2, RefreshCw, X } from "lucide-react";
 import type { UpdateState } from "./useUpdater";
+import { Button } from "../ui";
 import { edition } from "../edition";
 
 /**
@@ -39,12 +40,9 @@ export function UpdateBanner({
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <button
-              onClick={onInstall}
-              className="prism-hover mt-3 flex w-full items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--line-strong)] py-2 text-sm font-medium"
-            >
-              <Download className="h-4 w-4" /> Update &amp; restart
-            </button>
+            <Button variant="primary" size="md" icon={Download} onClick={onInstall} className="mt-3 w-full">
+              Update and restart
+            </Button>
           </>
         )}
 

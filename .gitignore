@@ -9,14 +9,21 @@ src-tauri/gen
 *.tsbuildinfo
 .shot_*.png
 
-# Release artifacts are served from disk by the zo.space endpoint, not tracked.
+# Release artifacts are served from disk by each edition's update channel
+# (infra/services/app-updates), not tracked.
 # latest.json (the published manifest) is kept.
 release/*.dmg
 release/*.app
 release/*.app.tar.gz
 release/*.app.tar.gz.sig
+release/*/*.dmg
+release/*/*.app.tar.gz
+release/*/*.app.tar.gz.sig
 
 # Invite relationship graph — an append-only event ledger written at runtime by
 # the /api/murmur/invite endpoint. It's data the network accretes (who invited
 # whom), the substrate for the Kabocha graph-compensation model, not source.
 data/
+
+# The Mac-built node program for "Keep a copy" (scripts/mac-node-build.sh), published to birdbrain.wtf
+release/node/

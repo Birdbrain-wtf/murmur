@@ -7,8 +7,6 @@ import {
   Hash,
   AtSign,
   X,
-  Cloud,
-  CloudOff,
   RefreshCw,
   Quote,
   Link2,
@@ -19,6 +17,7 @@ import {
   ArrowLeft,
   Smartphone,
   ArrowUpRight,
+  type LucideIcon,
 } from "lucide-react";
 import type { MurmurModule, PluginContext } from "../host/types";
 import {
@@ -35,6 +34,20 @@ import {
 } from "../lib/sensemaking";
 import SharedEditor from "./SharedEditor";
 import { edition } from "../edition";
+import {
+  Page,
+  PageHeader,
+  PageBody,
+  Section,
+  Card,
+  List,
+  Row,
+  Status,
+  Button,
+  Field,
+  Empty,
+  inputClass,
+} from "../ui";
 
 /**
  * Notes — core surface.
@@ -92,32 +105,26 @@ function load(): LocalNote[] {
   return [];
 }
 
-function typeColor(t?: string): string {
-  switch ((t || "").toLowerCase()) {
-    case "link":
-    case "links":
-      return "#00c7be";
-    case "quote":
-    case "quotes":
-      return "#af52de";
-    case "person":
-    case "people":
-      return "#34c759";
-    default:
-      return "#8a8a8a";
-  }
-}
+const TYPE_LABEL: Record<string, string> = {
+  note: "Note",
+  link: "Link",
+  quote: "Quote",
+  person: "Person",
+};
 
-function TypeIcon({ type, className }: { type: string; className?: string }) {
+const CHIP =
+  "font-mono rounded-[var(--radius)] border border-[var(--line)] px-1.5 py-0.5 text-[11px] text-[var(--muted)]";
+
+function typeIcon(type: string): LucideIcon {
   switch ((type || "").toLowerCase()) {
     case "link":
     case "links":
-      return <Link2 className={className} />;
+      return Link2;
     case "quote":
     case "quotes":
-      return <Quote className={className} />;
+      return Quote;
     default:
-      return <FileText className={className} />;
+      return FileText;
   }
 }
 
@@ -195,11 +202,12 @@ function ChipInput({
       {value.map((v) => (
         <span
           key={v}
-          className="font-mono flex items-center gap-1 rounded-full border border-[var(--line)] bg-[var(--raise)] px-2 py-0.5 text-[11px] text-[var(--muted)]"
+          className="font-mono flex items-center gap-1 rounded-[var(--radius)] border border-[var(--line)] bg-[var(--raise)] px-1.5 py-0.5 text-[11px] text-[var(--muted)]"
         >
           {v}
           <button
             onClick={() => onChange(value.filter((x) => x !== v))}
+            aria-label={`Remove ${v}`}
             className="text-[var(--faint)] hover:text-[var(--fg)]"
           >
             <X className="h-2.5 w-2.5" />
@@ -426,273 +434,261 @@ function Panel({ instance, identity }: PluginContext) {
     ? results.map(vaultToTrail)
     : null;
 
+  const headerStatus = loadingVault ? (
+    <Status tone="idle" pulse>
+      Checking the vault
+    </Status>
+  ) : vaultTotal != null ? (
+    <Status tone="ok">
+      {vaultTotal} {vaultTotal === 1 ? "note" : "notes"} in the vault
+    </Status>
+  ) : edition.vaultSync ? (
+    <Status tone="warn">Vault offline, saving here</Status>
+  ) : (
+    <Status tone="idle">On this device</Status>
+  );
+
+  const keptWhere = edition.vaultSync
+    ? `Syncs to ${edition.vaultName}`
+    : "Saved on this device";
+
+  function openRoom() {
+    const r = roomDraft.trim().toLowerCase().replace(/\s+/g, "-");
+    if (r) setRoom(r);
+  }
+
   return (
-    <div className="flex h-full flex-col">
-      <header className="border-b border-[var(--line)] px-8 pt-7 pb-5">
-        <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
-          <NotebookPen className="h-3.5 w-3.5" />
-          notes
-        </div>
-        <div className="mt-2 flex items-end justify-between gap-4">
-          <h1 className="font-tight text-2xl font-medium">Personal sensemaking</h1>
-          <span className="font-mono text-[10px] text-[var(--faint)]">
-            {loadingVault
-              ? "syncing vault…"
-              : vaultTotal != null
-                ? `${vaultTotal} in the vault`
-                : edition.vaultSync
-                  ? "vault offline — capturing locally"
-                  : "on this device"}
-          </span>
-        </div>
-        <p className="mt-1 max-w-xl text-sm text-[var(--muted)]">
-          {edition.vaultSync ? (
-            <>
-              Capture a thought with the <em>why</em>; it lands in {edition.vaultName} as
-              a first-class note — your private sensemaking layer. Carry it in your
-              pocket with{" "}
+    <Page>
+      <PageHeader
+        icon={NotebookPen}
+        eyebrow="notes"
+        title="Notes"
+        lede={
+          edition.vaultSync
+            ? `Capture a thought and why it matters. Notes are kept in ${edition.vaultName}, so you can find them again.`
+            : "Capture a thought and why it matters. Notes are kept on this device, yours alone."
+        }
+        actions={
+          <>
+            {headerStatus}
+            {edition.vaultSync && (
               <a
                 href={surfaceUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 text-[var(--fg)] underline decoration-[var(--line-strong)] underline-offset-2"
+                className="inline-flex items-center gap-1.5 px-1 text-xs text-[var(--muted)] underline-offset-4 hover:text-[var(--fg)] hover:underline"
               >
-                <Smartphone className="h-3 w-3" /> Surface
-                <ArrowUpRight className="h-2.5 w-2.5" />
-              </a>{" "}
-              — the same vault, on mobile.
-            </>
-          ) : (
-            <>
-              Capture a thought with the <em>why</em>. It stays on this device,
-              yours alone, until you connect your own server.
-            </>
-          )}
-        </p>
-
+                <Smartphone className="h-3.5 w-3.5" />
+                On your phone
+                <ArrowUpRight className="h-3.5 w-3.5" />
+              </a>
+            )}
+          </>
+        }
+      >
         {/* Personal capture vs. a live shared note */}
-        <div className="mt-4 inline-flex rounded-full border border-[var(--line)] bg-[var(--raise)] p-0.5 font-mono text-[11px]">
+        <div
+          role="tablist"
+          className="mt-4 inline-flex rounded-[var(--radius)] border border-[var(--line)] bg-[var(--raise)] p-0.5 text-xs"
+        >
           {(["personal", "shared"] as const).map((m) => (
             <button
               key={m}
+              role="tab"
+              aria-selected={mode === m}
               onClick={() => setMode(m)}
-              className={`flex items-center gap-1.5 rounded-full px-3 py-1 transition ${
+              className={`flex items-center gap-1.5 rounded-[var(--radius)] px-3 py-1 transition ${
                 mode === m
-                  ? "bg-[var(--card)] text-[var(--fg)] shadow-sm"
-                  : "text-[var(--faint)] hover:text-[var(--muted)]"
+                  ? "border border-[var(--line-strong)] bg-[var(--card)] text-[var(--fg)]"
+                  : "border border-transparent text-[var(--muted)] hover:text-[var(--fg)]"
               }`}
             >
               {m === "personal" ? (
-                <NotebookPen className="h-3 w-3" />
+                <NotebookPen className="h-3.5 w-3.5" />
               ) : (
-                <Share2 className="h-3 w-3" />
+                <Share2 className="h-3.5 w-3.5" />
               )}
-              {m}
+              {m === "personal" ? "Personal" : "Shared"}
             </button>
           ))}
         </div>
-      </header>
+      </PageHeader>
 
       {mode === "personal" ? (
-        <>
-      {/* Capture */}
-      <div className="px-8 pt-6">
-        <div
-          className="prism-hover rounded-[var(--radius)] border border-[var(--line-strong)] bg-[var(--card)] px-4 py-3"
-          data-active={draft.length > 0}
-        >
-          <textarea
-            ref={ref}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
-                e.preventDefault();
-                void capture();
-              }
-            }}
-            rows={3}
-            placeholder="What are you making sense of?"
-            className="w-full resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:text-[var(--faint)]"
-          />
-
-          {/* Intent — Matt's "big piece": the step that turns a note into sensemaking */}
-          <div className="mt-2 flex items-center gap-2 border-t border-[var(--line)] pt-2">
-            <span
-              className="h-1.5 w-1.5 shrink-0 rounded-full"
-              style={{ background: typeColor(detected) }}
-              title={`detected type: ${detected}`}
-            />
-            <input
-              value={intent}
-              onChange={(e) => setIntent(e.target.value)}
+        <PageBody width="wide">
+          {/* Capture */}
+          <div
+            className="prism-hover rounded-[var(--radius)] border border-[var(--line-strong)] bg-[var(--card)] px-4 py-3"
+            data-active={draft.length > 0}
+          >
+            <textarea
+              ref={ref}
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
                   e.preventDefault();
                   void capture();
                 }
               }}
-              placeholder="Why does this matter? (the intent — optional but the point)"
-              className="w-full bg-transparent text-[13px] italic outline-none placeholder:not-italic placeholder:text-[var(--faint)]"
+              rows={3}
+              placeholder="What are you making sense of?"
+              className="w-full resize-none bg-transparent text-[15px] leading-relaxed outline-none placeholder:text-[var(--faint)]"
             />
-          </div>
 
-          {/* Tags + people → vault frontmatter */}
-          <div className="mt-2 grid gap-2 border-t border-[var(--line)] pt-2 sm:grid-cols-2">
-            <ChipInput
-              value={tags}
-              onChange={setTags}
-              placeholder="tags"
-              lower
-              icon={<Hash className="h-3 w-3" />}
-            />
-            <ChipInput
-              value={people}
-              onChange={setPeople}
-              placeholder="people"
-              icon={<AtSign className="h-3 w-3" />}
-            />
-          </div>
-
-          <div className="mt-3 flex items-center justify-between">
-            <span className="font-mono text-[10px] text-[var(--faint)]">
-              {detectedUrl
-                ? `link · ${edition.vaultSync ? "syncs to core/vault" : "kept on this device"}`
-                : `${detected} · ${edition.vaultSync ? "syncs to core/vault" : "kept on this device"}`}
-            </span>
-            <button
-              onClick={() => void capture()}
-              disabled={!draft.trim() || capturing}
-              className="font-mono flex items-center gap-1.5 rounded-full border border-[var(--line)] px-3 py-1 text-xs text-[var(--muted)] transition hover:border-[var(--line-strong)] hover:text-[var(--fg)] disabled:opacity-40"
-            >
-              {capturing ? (
-                <Loader2 className="h-3 w-3 animate-spin" />
-              ) : (
-                <CornerDownLeft className="h-3 w-3" />
-              )}
-              capture
-            </button>
-          </div>
-        </div>
-      </div>
-
-      {/* Recall / search the vault */}
-      <div className="px-8 pt-4">
-        <div className="flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--raise)] px-3 py-1.5">
-          <Search className="h-3.5 w-3.5 text-[var(--faint)]" />
-          <input
-            value={query}
-            onChange={(e) => void runSearch(e.target.value)}
-            placeholder="Recall — search everything you've captured"
-            className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--faint)]"
-          />
-          {searching && <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--faint)]" />}
-          {query && !searching && (
-            <button
-              onClick={() => runSearch("")}
-              className="text-[var(--faint)] hover:text-[var(--fg)]"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Trail */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-8 py-5">
-        {showing ? (
-          showing.length === 0 ? (
-            <Empty text={`Nothing in the vault matches “${query}”.`} />
-          ) : (
-            <>
-              <div className="mb-2 font-mono text-[10px] uppercase tracking-[0.16em] text-[var(--faint)]">
-                {showing.length} result{showing.length === 1 ? "" : "s"}
-              </div>
-              <List items={showing} onRemove={removeItem} onRetry={retry} notes={notes} />
-            </>
-          )
-        ) : trail.length === 0 ? (
-          <Empty text={edition.vaultSync ? "No notes yet. The first capture starts your trail — and lands in the vault." : "No notes yet. The first capture starts your trail."} />
-        ) : (
-          <List items={trail} onRemove={removeItem} onRetry={retry} notes={notes} />
-        )}
-      </div>
-        </>
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col px-8 pt-6 pb-5">
-          {room ? (
-            <>
-              <div className="mb-3 flex items-center justify-between gap-3">
-                <div className="flex items-center gap-2 font-mono text-[11px] text-[var(--faint)]">
-                  <button
-                    onClick={() => setRoom(null)}
-                    className="flex items-center gap-1 hover:text-[var(--fg)]"
-                  >
-                    <ArrowLeft className="h-3.5 w-3.5" /> rooms
-                  </button>
-                  <span className="text-[var(--line-strong)]">/</span>
-                  <span className="text-[var(--fg)]">{room}</span>
-                </div>
-                <span className="font-mono text-[10px] text-[var(--faint)]">
-                  you are{" "}
-                  <span className="text-[var(--fg)]">{displayName}</span>
-                </span>
-              </div>
-              <SharedEditor room={room} base={base} displayName={displayName} />
-            </>
-          ) : (
-            <div className="mx-auto mt-6 w-full max-w-md">
-              <div className="rounded-[var(--radius)] border border-[var(--line-strong)] bg-[var(--card)] p-5">
-                <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
-                  <Users className="h-3.5 w-3.5" /> shared note
-                </div>
-                <p className="mt-2 text-sm text-[var(--muted)]">
-                  Pick a name two people both type in — everyone on the same name
-                  edits one live document. Save it to the vault when you're done.
-                </p>
-                <div className="mt-3 flex items-center gap-2 rounded-full border border-[var(--line)] bg-[var(--raise)] px-3 py-1.5">
-                  <Hash className="h-3.5 w-3.5 text-[var(--faint)]" />
-                  <input
-                    value={roomDraft}
-                    onChange={(e) => setRoomDraft(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        const r = roomDraft.trim().toLowerCase().replace(/\s+/g, "-");
-                        if (r) setRoom(r);
-                      }
-                    }}
-                    placeholder="room name, e.g. fttf-brief"
-                    className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--faint)]"
-                  />
-                </div>
-                <button
-                  onClick={() => {
-                    const r = roomDraft.trim().toLowerCase().replace(/\s+/g, "-");
-                    if (r) setRoom(r);
-                  }}
-                  disabled={!roomDraft.trim()}
-                  className="font-mono mt-3 flex w-full items-center justify-center gap-1.5 rounded-full border border-[var(--line)] px-3 py-1.5 text-xs text-[var(--muted)] transition hover:border-[var(--line-strong)] hover:text-[var(--fg)] disabled:opacity-40"
-                >
-                  <Share2 className="h-3 w-3" /> open shared note
-                </button>
-              </div>
+            {/* Intent: the step that turns a note into sensemaking */}
+            <div className="mt-2 border-t border-[var(--line)] pt-2">
+              <input
+                value={intent}
+                onChange={(e) => setIntent(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                    e.preventDefault();
+                    void capture();
+                  }
+                }}
+                placeholder="Why does this matter? Optional, but it's the point."
+                className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--faint)]"
+              />
             </div>
+
+            {/* Tags + people → vault frontmatter */}
+            <div className="mt-2 grid gap-2 border-t border-[var(--line)] pt-2 sm:grid-cols-2">
+              <ChipInput
+                value={tags}
+                onChange={setTags}
+                placeholder="Tags"
+                lower
+                icon={<Hash className="h-3 w-3" />}
+              />
+              <ChipInput
+                value={people}
+                onChange={setPeople}
+                placeholder="People"
+                icon={<AtSign className="h-3 w-3" />}
+              />
+            </div>
+
+            <div className="mt-3 flex items-center justify-between gap-3 border-t border-[var(--line)] pt-3">
+              <span className="text-xs text-[var(--faint)]" title={`Detected type: ${detected}`}>
+                {detectedUrl ? "Link" : TYPE_LABEL[detected] ?? "Note"} · {keptWhere}
+              </span>
+              <Button
+                variant="primary"
+                icon={CornerDownLeft}
+                busy={capturing}
+                disabled={!draft.trim()}
+                onClick={() => void capture()}
+              >
+                Capture
+              </Button>
+            </div>
+          </div>
+
+          {/* Recall / search the vault */}
+          <div className="relative">
+            <Search className="pointer-events-none absolute top-1/2 left-3 h-3.5 w-3.5 -translate-y-1/2 text-[var(--faint)]" />
+            <input
+              value={query}
+              onChange={(e) => void runSearch(e.target.value)}
+              placeholder="Search everything you've captured"
+              aria-label="Search your notes"
+              className={`${inputClass} pr-9 pl-9`}
+            />
+            <span className="absolute top-1/2 right-3 flex -translate-y-1/2 items-center">
+              {searching ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-[var(--faint)]" />
+              ) : query ? (
+                <button
+                  onClick={() => runSearch("")}
+                  aria-label="Clear search"
+                  className="text-[var(--faint)] hover:text-[var(--fg)]"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              ) : null}
+            </span>
+          </div>
+
+          {/* Trail */}
+          {showing ? (
+            showing.length === 0 ? (
+              <Empty>Nothing you've captured matches “{query}”.</Empty>
+            ) : (
+              <Section label={`${showing.length} result${showing.length === 1 ? "" : "s"}`}>
+                <TrailList items={showing} onRemove={removeItem} onRetry={retry} notes={notes} />
+              </Section>
+            )
+          ) : trail.length === 0 ? (
+            <Empty>
+              {edition.vaultSync
+                ? `No notes yet. Your first capture starts the list and syncs to ${edition.vaultName}.`
+                : "No notes yet. Your first capture starts the list."}
+            </Empty>
+          ) : (
+            <Section label="recent">
+              <TrailList items={trail} onRemove={removeItem} onRetry={retry} notes={notes} />
+            </Section>
           )}
+        </PageBody>
+      ) : room ? (
+        <div className="flex min-h-0 flex-1 flex-col px-8 pt-6 pb-20">
+          <div className="mb-3 flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2 text-xs">
+              <Button variant="quiet" icon={ArrowLeft} onClick={() => setRoom(null)}>
+                Rooms
+              </Button>
+              <span className="text-[var(--line-strong)]">/</span>
+              <span className="font-mono truncate text-[var(--fg)]">{room}</span>
+            </div>
+            <span className="text-xs text-[var(--muted)]">
+              You are <span className="font-mono text-[var(--fg)]">{displayName}</span>
+            </span>
+          </div>
+          <SharedEditor room={room} base={base} displayName={displayName} />
         </div>
+      ) : (
+        <PageBody>
+          <Section
+            label="shared note"
+            icon={Users}
+            lede={
+              edition.vaultSync
+                ? "Pick a room name you both type in. Everyone on the same name edits one live note. Save it to the vault when you're done."
+                : "Pick a room name you both type in. Everyone on the same name edits one live note."
+            }
+          >
+            <Card>
+              <Field label="Room name" hint="Anyone who types the same name joins the same note.">
+                <input
+                  value={roomDraft}
+                  onChange={(e) => setRoomDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") openRoom();
+                  }}
+                  placeholder="e.g. alice-and-bob"
+                  className={inputClass}
+                />
+              </Field>
+              <div className="mt-4">
+                <Button
+                  variant="primary"
+                  icon={Share2}
+                  onClick={openRoom}
+                  disabled={!roomDraft.trim()}
+                >
+                  Open shared note
+                </Button>
+              </div>
+            </Card>
+          </Section>
+        </PageBody>
       )}
-    </div>
+    </Page>
   );
 }
 
-function Empty({ text }: { text: string }) {
-  return (
-    <div className="rounded-[var(--radius)] border border-dashed border-[var(--line-strong)] bg-[var(--raise)] px-5 py-6 text-center">
-      <p className="text-sm text-[var(--muted)]">{text}</p>
-    </div>
-  );
-}
-
-function List({
+function TrailList({
   items,
   onRemove,
   onRetry,
@@ -704,115 +700,97 @@ function List({
   notes: LocalNote[];
 }) {
   return (
-    <div className="flex flex-col gap-2">
+    <List>
       {items.map((item) => {
         const local = notes.find((n) => n.id === item.key);
+        const when = item.ts
+          ? new Date(item.ts).toLocaleString([], {
+              day: "numeric",
+              month: "short",
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "";
         return (
-          <article
-            key={item.key}
-            className="prism-hover group rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] px-4 py-3"
-          >
-            <div className="flex items-start gap-2.5">
-              <span
-                className="mt-1 flex h-5 w-5 shrink-0 items-center justify-center rounded-full"
-                style={{ background: `${typeColor(item.type)}1a` }}
-              >
-                <TypeIcon
-                  type={item.type}
-                  className="h-3 w-3"
-                />
-              </span>
-              <div className="min-w-0 flex-1">
-                {item.body ? (
-                  <p className="font-serif whitespace-pre-wrap text-[14.5px] leading-relaxed">
-                    {item.body}
-                  </p>
-                ) : (
-                  <p className="text-[14.5px] leading-relaxed text-[var(--fg)]">
-                    {item.title}
-                  </p>
-                )}
-                {item.intent && (
-                  <p className="mt-1 text-[12.5px] italic text-[var(--muted)]">
-                    {item.intent}
-                  </p>
-                )}
-                {(item.tags.length > 0 || item.people.length > 0) && (
-                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    {item.tags.map((t) => (
-                      <span
-                        key={`t-${t}`}
-                        className="font-mono rounded-full border border-[var(--line)] px-2 py-0.5 text-[10px] text-[var(--muted)]"
-                      >
-                        #{t}
-                      </span>
-                    ))}
-                    {item.people.map((p) => (
-                      <span
-                        key={`p-${p}`}
-                        className="font-mono rounded-full border border-[var(--line)] px-2 py-0.5 text-[10px] text-[var(--muted)]"
-                      >
-                        @{p}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="font-mono text-[10px] text-[var(--faint)]">
-                    {item.ts
-                      ? new Date(item.ts).toLocaleString([], {
-                          day: "numeric",
-                          month: "short",
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })
-                      : ""}
-                  </span>
-                  {item.synced ? (
-                    <span
-                      className="flex items-center gap-1 font-mono text-[10px] text-[var(--faint)]"
-                      title={item.vaultPath}
-                    >
-                      <Cloud className="h-3 w-3" /> vault
-                    </span>
-                  ) : local ? (
-                    <button
-                      onClick={() => onRetry(local)}
-                      className="flex items-center gap-1 font-mono text-[10px] text-[#c1271d] hover:underline"
-                      title="Capture is local-only — retry vault sync"
-                    >
-                      <CloudOff className="h-3 w-3" /> local
-                      <RefreshCw className="h-2.5 w-2.5" />
-                    </button>
-                  ) : (
-                    <span className="flex items-center gap-1 font-mono text-[10px] text-[var(--faint)]">
-                      <CloudOff className="h-3 w-3" /> local
-                    </span>
+          <div key={item.key} className="group">
+            <Row
+              icon={typeIcon(item.type)}
+              title={
+                <span className="whitespace-pre-wrap font-normal">
+                  {item.body ?? item.title}
+                </span>
+              }
+              detail={
+                <>
+                  {item.intent && <p>{item.intent}</p>}
+                  {(item.tags.length > 0 || item.people.length > 0) && (
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                      {item.tags.map((t) => (
+                        <span key={`t-${t}`} className={CHIP}>
+                          #{t}
+                        </span>
+                      ))}
+                      {item.people.map((p) => (
+                        <span key={`p-${p}`} className={CHIP}>
+                          @{p}
+                        </span>
+                      ))}
+                    </div>
                   )}
-                </div>
-              </div>
-              <button
-                onClick={() => onRemove(item)}
-                className="text-[var(--faint)] opacity-0 transition hover:text-[#c1271d] group-hover:opacity-100"
-                title="Delete (from vault too)"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          </article>
+                  <div className="mt-2 flex flex-wrap items-center gap-3">
+                    {when && (
+                      <span className="font-mono text-[11px] text-[var(--faint)]">{when}</span>
+                    )}
+                    {item.synced ? (
+                      <span title={item.vaultPath}>
+                        <Status tone="ok">In the vault</Status>
+                      </span>
+                    ) : edition.vaultSync ? (
+                      <>
+                        <Status tone="warn">Not synced yet</Status>
+                        {local && (
+                          <Button
+                            variant="quiet"
+                            icon={RefreshCw}
+                            onClick={() => onRetry(local)}
+                          >
+                            Try again
+                          </Button>
+                        )}
+                      </>
+                    ) : (
+                      <Status tone="idle">On this device</Status>
+                    )}
+                  </div>
+                </>
+              }
+              action={
+                <button
+                  onClick={() => onRemove(item)}
+                  aria-label="Delete note"
+                  title={edition.vaultSync ? "Delete, from the vault too" : "Delete"}
+                  className="text-[var(--faint)] opacity-0 transition group-hover:opacity-100 hover:text-[var(--danger)] focus:opacity-100"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              }
+            />
+          </div>
         );
       })}
-    </div>
+    </List>
   );
 }
 
 export const notesSurface: MurmurModule = {
   id: "notes",
   title: "Notes",
-  tagline: `Personal sensemaking — capture into ${edition.vaultName}`,
+  tagline: edition.vaultSync
+    ? `Capture a thought and why it matters, kept in ${edition.vaultName}`
+    : "Capture a thought and why it matters, kept on this device",
   icon: NotebookPen,
   order: 1,
   kind: "core",
-  backend: edition.vaultSync ? "Decent vault (core/vault)" : "On this device",
+  backend: edition.vaultSync ? "The Decent vault" : "On this device",
   Panel,
 };

@@ -7,10 +7,12 @@ import { EditorView, keymap } from "@codemirror/view";
 import { defaultKeymap } from "@codemirror/commands";
 import { markdown } from "@codemirror/lang-markdown";
 import { yCollab, yUndoManagerKeymap } from "y-codemirror.next";
-import { Cloud, CloudOff, Loader2, Users, Save, Check } from "lucide-react";
+import { Users, Save, Check } from "lucide-react";
 import { collabServerUrl, peerColor, deriveRoomKey, roomIdFor } from "../lib/collab";
 import { EncryptedProvider } from "../lib/EncryptedProvider";
 import { captureNote } from "../lib/sensemaking";
+import { edition } from "../edition";
+import { Button, Status } from "../ui";
 
 type Status = "connecting" | "connected" | "offline";
 
@@ -145,45 +147,36 @@ export default function SharedEditor({
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center justify-between gap-3 pb-2">
-        <div className="flex items-center gap-3 font-mono text-[11px] text-[var(--faint)]">
-          <span className="flex items-center gap-1.5">
-            {status === "connected" ? (
-              <Cloud className="h-3.5 w-3.5 text-emerald-500" />
-            ) : status === "offline" ? (
-              <CloudOff className="h-3.5 w-3.5 text-amber-500" />
-            ) : (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            )}
-            {status === "connected"
-              ? "live"
-              : status === "offline"
-                ? "relay unreachable"
-                : "connecting…"}
-          </span>
-          <span className="flex items-center gap-1">
+      <div className="flex items-center justify-between gap-3 pb-3">
+        <div className="flex items-center gap-4">
+          {status === "connected" ? (
+            <Status tone="ok">Live</Status>
+          ) : status === "offline" ? (
+            <Status tone="warn">Offline, editing on this device</Status>
+          ) : (
+            <Status tone="idle" pulse>
+              Connecting
+            </Status>
+          )}
+          <span className="font-mono inline-flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
             <Users className="h-3.5 w-3.5" />
             {peers} here
           </span>
         </div>
-        <button
-          onClick={() => void saveToVault()}
-          disabled={saved === "saving"}
-          className="font-mono flex items-center gap-1.5 rounded-full border border-[var(--line)] px-3 py-1 text-xs text-[var(--muted)] transition hover:border-[var(--line-strong)] hover:text-[var(--fg)] disabled:opacity-40"
-        >
-          {saved === "saving" ? (
-            <Loader2 className="h-3 w-3 animate-spin" />
-          ) : saved === "done" ? (
-            <Check className="h-3 w-3 text-emerald-500" />
-          ) : (
-            <Save className="h-3 w-3" />
-          )}
-          {saved === "done"
-            ? "saved to vault"
-            : saved === "error"
-              ? "save failed"
-              : "save to vault"}
-        </button>
+        {edition.vaultSync && (
+          <Button
+            icon={saved === "done" ? Check : Save}
+            busy={saved === "saving"}
+            onClick={() => void saveToVault()}
+            variant={saved === "error" ? "danger" : "secondary"}
+          >
+            {saved === "done"
+              ? "Saved to the vault"
+              : saved === "error"
+                ? "Couldn't save, try again"
+                : "Save to the vault"}
+          </Button>
+        )}
       </div>
       <div
         ref={host}

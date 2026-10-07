@@ -3,16 +3,36 @@ import {
   MessageSquare,
   Hash,
   Send,
-  Loader2,
-  LogIn,
   Settings,
-  KeyRound,
   LogOut,
+  Fingerprint,
+  UserRound,
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
+import { edition, groupWord } from "../../edition";
+import {
+  Page,
+  PageHeader,
+  PageBody,
+  Section,
+  Eyebrow,
+  Gate,
+  inputClass,
+  Button,
+  Notice,
+  Dot,
+} from "../../ui";
+import { participate, today } from "../../identity/participation";
 
 /**
  * Chat plugin — Matrix.
+ *
+ * Signing in is the passkey. The app hands its session to the door that issued
+ * it (`<signIn.pair>/matrix`), which makes the member's account on their
+ * collective's own homeserver, seats them in the members room and returns a
+ * per-member token. There is no Matrix password to know, so there is no
+ * password form and no password to change. Server side:
+ * infra/services/chaos-auth/matrix-members.ts.
  *
  * matrix-js-sdk is lazy-imported on first use so the rest of the host renders
  * even if the SDK has browser-build quirks. v0.1 runs without e2ee (no olm /
@@ -25,7 +45,12 @@ interface RoomLite {
   id: string;
   name: string;
   unread: number;
+  /** someone has invited this account and it has not joined yet */
+  invited: boolean;
 }
+
+// A Matrix address: @name:server.
+const MXID = /^@[^:\s]+:[^\s]+$/;
 interface EventLite {
   id: string;
   sender: string;
@@ -36,32 +61,28 @@ interface EventLite {
 
 const SESSION_KEY = "murmur.matrix.session.v1";
 
-function Panel({ instance, identity }: PluginContext) {
+function Panel({ identity, open }: PluginContext) {
   const [client, setClient] = useState<any>(null);
   const [phase, setPhase] = useState<"loggedout" | "connecting" | "ready">(
     "loggedout",
   );
   const [error, setError] = useState<string | null>(null);
 
-  const [hs, setHs] = useState(instance.matrixHomeserver);
-  const [user, setUser] = useState("");
-  const [pass, setPass] = useState("");
+  const [notOpen, setNotOpen] = useState(false);
 
   const [rooms, setRooms] = useState<RoomLite[]>([]);
   const [activeRoom, setActiveRoom] = useState<string | null>(null);
   const [events, setEvents] = useState<EventLite[]>([]);
   const [draft, setDraft] = useState("");
+  const [to, setTo] = useState("");
+  const [starting, setStarting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // Account view (in-app self-management — built for users who never touch Element).
   const [view, setView] = useState<"chat" | "account">("chat");
-  const [curPw, setCurPw] = useState("");
-  const [newPw, setNewPw] = useState("");
-  const [confirmPw, setConfirmPw] = useState("");
-  const [pwBusy, setPwBusy] = useState(false);
-  const [pwMsg, setPwMsg] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const signedIn = !!(identity.signedIn && identity.session);
 
-  // Restore a persisted session on mount.
+  // Restore a persisted session on mount, or open chat with the passkey session
+  // if there is none yet.
   useEffect(() => {
     const raw = localStorage.getItem(SESSION_KEY);
     if (raw) {
@@ -71,6 +92,8 @@ function Panel({ instance, identity }: PluginContext) {
       } catch {
         /* ignore */
       }
+    } else if (signedIn) {
+      void openWithPasskey();
     }
     return () => {
       try {
@@ -120,35 +143,49 @@ function Panel({ instance, identity }: PluginContext) {
         id: r.roomId,
         name: r.name || r.roomId,
         unread: r.getUnreadNotificationCount?.() ?? 0,
+        invited: r.getMyMembership?.() === "invite",
       }))
       .sort((a: RoomLite, b: RoomLite) => a.name.localeCompare(b.name));
     setRooms(list);
-    setActiveRoom((prev) => prev ?? list[0]?.id ?? null);
+    setActiveRoom((prev) => prev ?? list.find((r) => !r.invited)?.id ?? null);
   }
 
-  async function doLogin(e: React.FormEvent) {
-    e.preventDefault();
+  // Trade the app's passkey session for a chat account on this collective's own
+  // server. Idempotent: the door finds the account and the seat if they exist.
+  async function openWithPasskey() {
+    if (!identity.session) return;
     setPhase("connecting");
     setError(null);
+    setNotOpen(false);
     try {
-      const sdk: any = await import("matrix-js-sdk");
-      const tmp = sdk.createClient({ baseUrl: hs });
-      const res = await tmp.login("m.login.password", {
-        user: user.replace(/^@/, "").split(":")[0],
-        password: pass,
+      const r = await fetch(`${edition.signIn.pair}/matrix`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ session: identity.session }),
       });
-      const session = {
-        baseUrl: hs,
-        accessToken: res.access_token,
-        userId: res.user_id,
-      };
+      const j = await r.json().catch(() => ({}));
+      if (r.status === 503 && j.notOpen) {
+        setNotOpen(true);
+        setPhase("loggedout");
+        return;
+      }
+      if (!r.ok || !j.accessToken) throw new Error(j.error || `Chat did not open (${r.status}).`);
+      const session = { baseUrl: j.baseUrl, accessToken: j.accessToken, userId: j.userId };
       localStorage.setItem(SESSION_KEY, JSON.stringify(session));
       await start(session);
+      if (j.roomId) setActiveRoom(j.roomId);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "login failed");
+      setError(e instanceof Error ? e.message : "Chat did not open.");
       setPhase("loggedout");
     }
   }
+
+  // Signing out of the app signs out of chat too, so a shared computer does not
+  // stay in the last person's rooms.
+  useEffect(() => {
+    if (!signedIn && client) void signOut();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [signedIn]);
 
   // Load timeline when active room changes.
   useEffect(() => {
@@ -194,6 +231,42 @@ function Panel({ instance, identity }: PluginContext) {
     };
   }, [client, activeRoom]);
 
+  // Start a direct conversation with someone by their Matrix address, so a
+  // member can talk to the people they invite without leaving the app.
+  async function startDirect(e: React.FormEvent) {
+    e.preventDefault();
+    const target = to.trim();
+    if (!client || !MXID.test(target) || starting) return;
+    setStarting(true);
+    setError(null);
+    try {
+      const { room_id } = await client.createRoom({
+        is_direct: true,
+        invite: [target],
+        preset: "trusted_private_chat",
+      });
+      // Mark it as a direct chat in the account, which other Matrix apps read too.
+      const direct = { ...(client.getAccountData?.("m.direct")?.getContent?.() ?? {}) };
+      direct[target] = [...new Set([...(direct[target] ?? []), room_id])];
+      await client.setAccountData("m.direct", direct).catch(() => {});
+      setTo("");
+      setActiveRoom(room_id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not start the conversation.");
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  async function join(roomId: string) {
+    try {
+      await client.joinRoom(roomId);
+      setActiveRoom(roomId);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not join the room.");
+    }
+  }
+
   async function send(e: React.FormEvent) {
     e.preventDefault();
     const body = draft.trim();
@@ -201,80 +274,11 @@ function Panel({ instance, identity }: PluginContext) {
     setDraft("");
     try {
       await client.sendTextMessage(activeRoom, body);
+      // Speaking in a room is taking part: a signed check-in for this room today.
+      // Reading is not, so opening a room records nothing (ADR 0069).
+      void participate("chat", `chat:${activeRoom}@${today()}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "send failed");
-    }
-  }
-
-  // Change the account password via Matrix user-interactive auth: an unauthed
-  // POST returns a UIA `session`, which we complete with the current password.
-  async function changePassword(current: string, next: string): Promise<void> {
-    const baseUrl: string = client.baseUrl;
-    const token: string = client.getAccessToken();
-    const userId: string = client.getUserId();
-    const url = `${baseUrl}/_matrix/client/v3/account/password`;
-    const headers = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-    };
-
-    const res1 = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ new_password: next, logout_devices: false }),
-    });
-    if (res1.ok) return; // server accepted without a challenge
-    if (res1.status !== 401) {
-      const e = await res1.json().catch(() => ({}));
-      throw new Error(e.error || `unexpected response (${res1.status})`);
-    }
-    const uia = await res1.json();
-
-    const res2 = await fetch(url, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        new_password: next,
-        logout_devices: false,
-        auth: {
-          type: "m.login.password",
-          identifier: { type: "m.id.user", user: userId },
-          password: current,
-          session: uia.session,
-        },
-      }),
-    });
-    if (!res2.ok) {
-      const e = await res2.json().catch(() => ({}));
-      if (res2.status === 401 || res2.status === 403) {
-        throw new Error("Current password is incorrect.");
-      }
-      throw new Error(e.error || `change failed (${res2.status})`);
-    }
-  }
-
-  async function submitPassword(e: React.FormEvent) {
-    e.preventDefault();
-    setPwMsg(null);
-    if (newPw.length < 8) {
-      setPwMsg({ kind: "err", text: "New password must be at least 8 characters." });
-      return;
-    }
-    if (newPw !== confirmPw) {
-      setPwMsg({ kind: "err", text: "New passwords don't match." });
-      return;
-    }
-    setPwBusy(true);
-    try {
-      await changePassword(curPw, newPw);
-      setPwMsg({ kind: "ok", text: "Password changed." });
-      setCurPw("");
-      setNewPw("");
-      setConfirmPw("");
-    } catch (err) {
-      setPwMsg({ kind: "err", text: err instanceof Error ? err.message : "change failed" });
-    } finally {
-      setPwBusy(false);
     }
   }
 
@@ -295,275 +299,219 @@ function Panel({ instance, identity }: PluginContext) {
     setEvents([]);
     setActiveRoom(null);
     setView("chat");
-    setPass("");
-    setCurPw("");
-    setNewPw("");
-    setConfirmPw("");
-    setPwMsg(null);
     setError(null);
     setPhase("loggedout");
   }
 
-  // ── Logged-out: login form ───────────────────────────────────────
+  const header = (
+    <PageHeader
+      icon={MessageSquare}
+      eyebrow="chat"
+      title="Chat"
+      lede={`Talk to the people in your ${groupWord}.${identity.handle ? ` Signed in as ${identity.handle}.` : ""}`}
+    />
+  );
+
+  // ── Not connected: the passkey opens chat ───────────────────────
   if (phase !== "ready") {
     return (
-      <div className="flex h-full flex-col">
-        <Header />
-        <div className="flex flex-1 items-center justify-center px-8">
-          <form
-            onSubmit={doLogin}
-            className="w-full max-w-sm rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] p-6"
-          >
-            <div className="font-tight text-lg font-medium">Connect to Matrix</div>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              The chat substrate for {instance.name}.
-            </p>
-            <div className="mt-5 flex flex-col gap-3">
-              <Field label="Homeserver">
-                <input
-                  value={hs}
-                  onChange={(e) => setHs(e.target.value)}
-                  className="w-full bg-transparent text-sm outline-none"
-                  placeholder="https://matrix.org"
-                />
-              </Field>
-              <Field label="Username">
-                <input
-                  value={user}
-                  onChange={(e) => setUser(e.target.value)}
-                  className="w-full bg-transparent text-sm outline-none"
-                  placeholder="alice"
-                />
-              </Field>
-              <Field label="Password">
-                <input
-                  type="password"
-                  value={pass}
-                  onChange={(e) => setPass(e.target.value)}
-                  className="w-full bg-transparent text-sm outline-none"
-                  placeholder="••••••••"
-                />
-              </Field>
-            </div>
-            {error && (
-              <div className="mt-3 text-xs text-[#c1271d]">{error}</div>
-            )}
-            <button
-              type="submit"
-              disabled={phase === "connecting"}
-              className="prism-hover mt-5 flex w-full items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--line-strong)] py-2.5 text-sm font-medium disabled:opacity-50"
+      <Page>
+        {header}
+        <PageBody width="read">
+          {!signedIn ? (
+            <Gate
+              icon={MessageSquare}
+              title="Sign in to chat"
+              action={
+                <Button variant="primary" size="md" icon={UserRound} onClick={() => open("identity")}>
+                  Open Profile
+                </Button>
+              }
             >
-              {phase === "connecting" ? (
-                <>
-                  <Loader2 className="h-4 w-4 animate-spin" /> connecting…
-                </>
-              ) : (
-                <>
-                  <LogIn className="h-4 w-4" /> Sign in
-                </>
-              )}
-            </button>
-          </form>
-        </div>
-      </div>
+              <p>
+                Chat opens with your passkey. Sign in to {edition.instance.name} in Profile and you will
+                land in the room with everyone else in your {groupWord}.
+              </p>
+            </Gate>
+          ) : notOpen ? (
+            <Gate icon={MessageSquare} title="Chat is not open yet">
+              <p>
+                Your {groupWord}'s chat server is not running yet. When it is, opening Chat puts you
+                straight into the members room, with nothing to set up.
+              </p>
+            </Gate>
+          ) : (
+            <Gate
+              icon={MessageSquare}
+              title="Open chat"
+              action={
+                <Button
+                  variant="primary"
+                  size="md"
+                  icon={Fingerprint}
+                  busy={phase === "connecting"}
+                  onClick={() => void openWithPasskey()}
+                >
+                  {phase === "connecting" ? "Opening" : "Open chat"}
+                </Button>
+              }
+            >
+              <p>
+                Your chat account comes with your passkey. Opening Chat makes it the first time and puts
+                you in the room with everyone else in your {groupWord}.
+              </p>
+              {error && <Notice tone="danger">{error}</Notice>}
+            </Gate>
+          )}
+        </PageBody>
+      </Page>
     );
   }
 
   // ── Ready: rooms + timeline ──────────────────────────────────────
   const activeName = rooms.find((r) => r.id === activeRoom)?.name ?? "";
   return (
-    <div className="flex h-full">
-      <aside className="flex w-60 shrink-0 flex-col border-r border-[var(--line)]">
-        <div className="border-b border-[var(--line)] px-4 py-3 text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
-          rooms
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto py-2">
-          {rooms.map((r) => (
-            <button
-              key={r.id}
-              onClick={() => setActiveRoom(r.id)}
-              data-active={r.id === activeRoom}
-              className="prism-hover flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[var(--muted)] data-[active=true]:text-[var(--fg)]"
-            >
-              <Hash className="h-3.5 w-3.5 shrink-0 text-[var(--faint)]" />
-              <span className="truncate">{r.name}</span>
-              {r.unread > 0 && (
-                <span className="ml-auto h-1.5 w-1.5 rounded-full bg-[#007aff]" />
-              )}
-            </button>
-          ))}
-          {rooms.length === 0 && (
-            <div className="px-4 py-2 text-xs text-[var(--faint)]">
-              No rooms yet.
-            </div>
-          )}
-        </div>
-        <div className="border-t border-[var(--line)] p-2">
-          <button
-            onClick={() => setView(view === "account" ? "chat" : "account")}
-            data-active={view === "account"}
-            className="prism-hover flex w-full items-center gap-2 rounded-[var(--radius)] px-3 py-2 text-left text-sm text-[var(--muted)] data-[active=true]:text-[var(--fg)]"
-          >
-            <Settings className="h-3.5 w-3.5 shrink-0 text-[var(--faint)]" />
-            <span className="truncate">{shortSender(client?.getUserId?.() ?? "account")}</span>
-          </button>
-        </div>
-      </aside>
-
-      <section className="flex min-w-0 flex-1 flex-col">
-        {view === "account" ? (
-          <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
-            <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
-              <Settings className="h-3.5 w-3.5" />
-              account
-            </div>
-            <h1 className="font-tight mt-2 text-2xl font-medium">
-              {client?.getUserId?.() ?? "Account"}
-            </h1>
-            <p className="mt-1 text-sm text-[var(--muted)]">
-              Manage your Decent identity.
-            </p>
-
-            <form onSubmit={submitPassword} className="mt-6 w-full max-w-sm">
-              <div className="font-tight text-lg font-medium">Change password</div>
-              <div className="mt-4 flex flex-col gap-3">
-                <Field label="Current password">
-                  <input
-                    type="password"
-                    value={curPw}
-                    onChange={(e) => setCurPw(e.target.value)}
-                    className="w-full bg-transparent text-sm outline-none"
-                    placeholder="••••••••"
-                  />
-                </Field>
-                <Field label="New password">
-                  <input
-                    type="password"
-                    value={newPw}
-                    onChange={(e) => setNewPw(e.target.value)}
-                    className="w-full bg-transparent text-sm outline-none"
-                    placeholder="at least 8 characters"
-                  />
-                </Field>
-                <Field label="Confirm new password">
-                  <input
-                    type="password"
-                    value={confirmPw}
-                    onChange={(e) => setConfirmPw(e.target.value)}
-                    className="w-full bg-transparent text-sm outline-none"
-                    placeholder="••••••••"
-                  />
-                </Field>
+    <Page>
+      {header}
+      <div className="flex min-h-0 flex-1">
+        <aside className="flex w-64 shrink-0 flex-col border-r border-[var(--line)]">
+          <div className="border-b border-[var(--line)] px-8 py-3">
+            <Eyebrow icon={Hash}>rooms</Eyebrow>
+          </div>
+          <form onSubmit={startDirect} className="flex items-center gap-2 border-b border-[var(--line)] px-4 py-3">
+            <input
+              value={to}
+              onChange={(e) => setTo(e.target.value)}
+              placeholder={`Message @alice:${serverOf(client?.getUserId?.() ?? "")}`}
+              spellCheck={false}
+              aria-label="Start a conversation with a Matrix address"
+              className={`${inputClass} font-mono min-w-0 flex-1 px-2.5 py-1.5 text-xs`}
+            />
+            <Button
+              type="submit"
+              disabled={!MXID.test(to.trim())}
+              busy={starting}
+              icon={Send}
+              title="Start a conversation"
+              aria-label="Start a conversation"
+            />
+          </form>
+          <div className="min-h-0 flex-1 overflow-y-auto py-2">
+            {rooms.map((r) => r.invited ? (
+              <div key={r.id} className="flex items-center gap-2 px-4 py-2 text-sm text-[var(--muted)]">
+                <Hash className="h-3.5 w-3.5 shrink-0 text-[var(--faint)]" />
+                <span className="truncate">{r.name}</span>
+                <Button className="ml-auto" onClick={() => void join(r.id)}>
+                  Join
+                </Button>
               </div>
-              {pwMsg && (
-                <div
-                  className="mt-3 text-xs"
-                  style={{ color: pwMsg.kind === "ok" ? "#1a7f37" : "#c1271d" }}
-                >
-                  {pwMsg.text}
-                </div>
-              )}
+            ) : (
               <button
-                type="submit"
-                disabled={pwBusy}
-                className="prism-hover mt-5 flex w-full items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--line-strong)] py-2.5 text-sm font-medium disabled:opacity-50"
+                key={r.id}
+                onClick={() => setActiveRoom(r.id)}
+                data-active={r.id === activeRoom}
+                className="prism-hover flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[var(--muted)] data-[active=true]:text-[var(--fg)]"
               >
-                {pwBusy ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" /> updating…
-                  </>
-                ) : (
-                  <>
-                    <KeyRound className="h-4 w-4" /> Change password
-                  </>
+                <Hash className="h-3.5 w-3.5 shrink-0 text-[var(--faint)]" />
+                <span className="truncate">{r.name}</span>
+                {r.unread > 0 && (
+                  <span className="ml-auto">
+                    <Dot tone="live" />
+                  </span>
                 )}
               </button>
-            </form>
-
-            <div className="mt-8 w-full max-w-sm border-t border-[var(--line)] pt-6">
-              <button
-                onClick={signOut}
-                className="prism-hover flex items-center gap-2 rounded-[var(--radius)] border border-[var(--line-strong)] px-4 py-2.5 text-sm font-medium text-[#c1271d]"
-              >
-                <LogOut className="h-4 w-4" /> Sign out
-              </button>
-            </div>
+            ))}
+            {rooms.length === 0 && (
+              <p className="px-4 py-2 text-xs text-[var(--faint)]">No rooms yet.</p>
+            )}
           </div>
-        ) : (
-          <>
-            <div className="flex items-center gap-2 border-b border-[var(--line)] px-6 py-3">
-              <Hash className="h-4 w-4 text-[var(--faint)]" />
-              <span className="font-tight text-sm font-medium">{activeName}</span>
-            </div>
-            <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
-              <div className="flex flex-col gap-3">
-                {events.map((ev) => (
-                  <div key={ev.id} className="flex flex-col">
-                    <div className="flex items-baseline gap-2">
-                      <span
-                        className="font-mono text-[11px]"
-                        style={{ color: ev.mine ? "#007aff" : "var(--faint)" }}
-                      >
-                        {shortSender(ev.sender)}
-                      </span>
-                      <span className="font-mono text-[10px] text-[var(--faint)]">
-                        {new Date(ev.ts).toLocaleTimeString([], {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    </div>
-                    <p className="text-[14px] leading-relaxed">{ev.body}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-            <form
-              onSubmit={send}
-              className="prism-hover flex items-center gap-3 border-t border-[var(--line)] px-6 py-3"
+          <div className="border-t border-[var(--line)] p-2">
+            <button
+              onClick={() => setView(view === "account" ? "chat" : "account")}
+              data-active={view === "account"}
+              className="prism-hover flex w-full items-center gap-2 rounded-[var(--radius)] px-3 py-2 text-left text-sm text-[var(--muted)] data-[active=true]:text-[var(--fg)]"
             >
-              <input
-                value={draft}
-                onChange={(e) => setDraft(e.target.value)}
-                placeholder={`Message ${activeName}…`}
-                className="flex-1 bg-transparent text-sm outline-none placeholder:text-[var(--faint)]"
-              />
-              <button type="submit" className="text-[var(--muted)] hover:text-[var(--fg)]">
-                <Send className="h-4 w-4" />
-              </button>
-            </form>
-          </>
-        )}
-      </section>
-    </div>
-  );
+              <Settings className="h-3.5 w-3.5 shrink-0 text-[var(--faint)]" />
+              <span className="truncate">{shortSender(client?.getUserId?.() ?? "account")}</span>
+            </button>
+          </div>
+        </aside>
 
-  function Header() {
-    return (
-      <header className="border-b border-[var(--line)] px-8 pt-7 pb-5">
-        <div className="flex items-center gap-2 text-[11px] uppercase tracking-[0.18em] text-[var(--faint)]">
-          <MessageSquare className="h-3.5 w-3.5" />
-          chat
-        </div>
-        <h1 className="font-tight mt-2 text-2xl font-medium">Conversation</h1>
-        <p className="mt-1 text-sm text-[var(--muted)]">
-          {identity.handle ? `Signed in as ${identity.handle}. ` : ""}
-          Matrix is the live substrate the flock talks over.
-        </p>
-      </header>
-    );
-  }
+        <section className="flex min-w-0 flex-1 flex-col">
+          {view === "account" ? (
+            <PageBody width="read">
+              <Section label="account" icon={Settings} lede={<span className="font-mono">{client?.getUserId?.() ?? ""}</span>}>
+                <p className="text-[13px] leading-relaxed text-[var(--muted)]">
+                  This address is yours on your {groupWord}'s chat server. Your passkey is how you get back
+                  into it, so there is no password to keep.
+                </p>
+              </Section>
+              <Section label="this device">
+                <Button variant="danger" size="md" icon={LogOut} onClick={signOut}>
+                  Sign out of chat
+                </Button>
+              </Section>
+            </PageBody>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 border-b border-[var(--line)] px-8 py-3">
+                <Hash className="h-4 w-4 text-[var(--faint)]" />
+                <span className="font-tight text-sm font-medium">{activeName}</span>
+              </div>
+              <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-8 py-4">
+                <div className="flex flex-col gap-3">
+                  {events.map((ev) => (
+                    <div key={ev.id} className="flex flex-col">
+                      <div className="flex items-baseline gap-2">
+                        <span
+                          className="font-mono text-[11px]"
+                          style={{ color: ev.mine ? "var(--accent)" : "var(--faint)" }}
+                        >
+                          {shortSender(ev.sender)}
+                        </span>
+                        <span className="font-mono text-[10px] text-[var(--faint)]">
+                          {new Date(ev.ts).toLocaleTimeString([], {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                      </div>
+                      <p className="text-[14px] leading-relaxed">{ev.body}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {error && (
+                <div className="px-8 pb-2">
+                  <Notice tone="danger">{error}</Notice>
+                </div>
+              )}
+              {/* pr-36 keeps the composer clear of the host's floating Suggest button */}
+              <form
+                onSubmit={send}
+                className="flex items-center gap-3 border-t border-[var(--line)] py-3 pl-8 pr-36"
+              >
+                <input
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  placeholder={activeName ? `Message ${activeName}` : "Message"}
+                  className={`${inputClass} flex-1`}
+                />
+                <Button type="submit" size="md" icon={Send} disabled={!draft.trim() || !activeRoom}>
+                  Send
+                </Button>
+              </form>
+            </>
+          )}
+        </section>
+      </div>
+    </Page>
+  );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="prism-hover block rounded-[var(--radius)] border border-[var(--line-strong)] px-3 py-2">
-      <span className="font-mono block text-[10px] uppercase tracking-wider text-[var(--faint)]">
-        {label}
-      </span>
-      {children}
-    </label>
-  );
+/** The server part of a Matrix address: @alice:decent.partners → decent.partners */
+function serverOf(mxid: string): string {
+  return mxid.split(":").slice(1).join(":") || "server";
 }
 
 function shortSender(s: string): string {
@@ -573,7 +521,7 @@ function shortSender(s: string): string {
 export const chatPlugin: MurmurPlugin = {
   id: "chat",
   title: "Chat",
-  tagline: "Talk over Matrix — the flock's live substrate",
+  tagline: `Talk to the people in your ${groupWord}`,
   icon: MessageSquare,
   order: 20,
   kind: "plugin",

@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { Identity } from "../host/types";
 import type { SignedIn } from "./passkey";
+import { revoke } from "./participation";
 
 const KEY = "murmur.identity.v1";
 
@@ -70,9 +71,14 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  // Signing out also switches check-ins off and forgets the chat login, so a
+  // shared machine cannot go on recording, or talking as, the last person who
+  // used it. Chat's account comes back with the passkey on the next sign-in.
   const signOut = useCallback(() => {
+    void revoke(identity.session);
+    localStorage.removeItem("murmur.matrix.session.v1");
     setIdentity(SIGNED_OUT);
-  }, []);
+  }, [identity.session]);
 
   return (
     <Ctx.Provider value={{ identity, signIn, signOut }}>
