@@ -1,6 +1,6 @@
 [package]
 name = "murmur"
-version = "0.4.1"
+version = "0.4.2"
 description = "Murmur and its editions: a plugin host over Matrix, Seeds and the group's memory"
 authors = ["Birdbrain"]
 edition = "2021"
@@ -31,7 +31,8 @@ flate2 = "1"
 base64 = "0.22"
 
 # Secrets and API keys live in the system's own secure store (the macOS Keychain,
-# Windows Credential Manager), never in the webview's storage. See src/lib/secrets.ts.
+# Windows Credential Manager, the Linux desktop's keyring), never in the webview's
+# storage. See src/lib/secrets.ts.
 # The light client (ADR 0068): checks the chain's finality proofs on this device. No
 # wasmtime: smoldot's own interpreter runs the runtime calls a light client needs, and
 # wasmtime would add megabytes. GPL-3.0 with the Classpath exception, which allows
@@ -57,8 +58,10 @@ features = ["ring"]
 keyring = { version = "3", features = ["apple-native"] }
 [target.'cfg(target_os = "windows")'.dependencies]
 keyring = { version = "3", features = ["windows-native"] }
+# Linux: the desktop keyring over the Secret Service (GNOME Keyring, KWallet). Not
+# "linux-native", which is the kernel keyring and is emptied at every reboot.
 [target.'cfg(target_os = "linux")'.dependencies]
-keyring = { version = "3", features = ["linux-native"] }
+keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
 
 [profile.release]
 panic = "abort"

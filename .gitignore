@@ -27,3 +27,11 @@ data/
 
 # The Mac-built node program for "Keep a copy" (scripts/mac-node-build.sh), published to birdbrain.wtf
 release/node/
+release/*.AppImage
+release/*.AppImage.sig
+release/*.deb
+release/*.deb.sig
+release/*/*.AppImage
+release/*/*.AppImage.sig
+release/*/*.deb
+release/*/*.deb.sig

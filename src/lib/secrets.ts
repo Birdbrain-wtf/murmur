@@ -1,8 +1,8 @@
 /**
  * Secrets and API keys, kept in the system's own secure store.
  *
- * In the desktop app every value goes to the macOS Keychain (or Windows
- * Credential Manager) through the secret_* commands in src-tauri/src/lib.rs,
+ * In the desktop app every value goes to the macOS Keychain (Windows Credential
+ * Manager, or the Linux desktop's keyring) through the secret_* commands in src-tauri/src/lib.rs,
  * filed under the edition's bundle id. The webview never stores a value: only
  * the list of names sits in localStorage, so Settings can show what is saved
  * without reading anything back.

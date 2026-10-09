@@ -7,6 +7,7 @@ import {
   LogOut,
   Fingerprint,
   UserRound,
+  Link2,
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { edition, groupWord } from "../../edition";
@@ -31,8 +32,10 @@ import { participate, today } from "../../identity/participation";
  * it (`<signIn.pair>/matrix`), which makes the member's account on their
  * collective's own homeserver, seats them in the members room and returns a
  * per-member token. There is no Matrix password to know, so there is no
- * password form and no password to change. Server side:
- * infra/services/chaos-auth/matrix-members.ts.
+ * password form and no password to change. Someone in two collectives has one
+ * account in each edition, all opened by the same passkey. A member who already
+ * uses Matrix elsewhere can have that address invited too (`<signIn.pair>/matrix-link`).
+ * Server side: infra/services/chaos-auth/matrix-members.ts.
  *
  * matrix-js-sdk is lazy-imported on first use so the rest of the host renders
  * even if the SDK has browser-build quirks. v0.1 runs without e2ee (no olm /
@@ -79,6 +82,10 @@ function Panel({ identity, open }: PluginContext) {
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const [view, setView] = useState<"chat" | "account">("chat");
+  const [elsewhere, setElsewhere] = useState("");
+  const [linking, setLinking] = useState(false);
+  const [linked, setLinked] = useState<string | null>(null);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const signedIn = !!(identity.signedIn && identity.session);
 
   // Restore a persisted session on mount, or open chat with the passkey session
@@ -177,6 +184,31 @@ function Panel({ identity, open }: PluginContext) {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Chat did not open.");
       setPhase("loggedout");
+    }
+  }
+
+  // Bring an address the member already has elsewhere into the members room.
+  // The door invites it; only its owner can accept, so nothing else is checked.
+  async function linkElsewhere(e: React.FormEvent) {
+    e.preventDefault();
+    const mxid = elsewhere.trim();
+    if (!identity.session || !MXID.test(mxid)) return;
+    setLinking(true);
+    setLinkError(null);
+    try {
+      const r = await fetch(`${edition.signIn.pair}/matrix-link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ session: identity.session, mxid }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok) throw new Error(j.error || `The invite did not go (${r.status}).`);
+      setLinked(j.invited || mxid);
+      setElsewhere("");
+    } catch (err) {
+      setLinkError(err instanceof Error ? err.message : "The invite did not go.");
+    } finally {
+      setLinking(false);
     }
   }
 
@@ -445,6 +477,27 @@ function Panel({ identity, open }: PluginContext) {
                   This address is yours on your {groupWord}'s chat server. Your passkey is how you get back
                   into it, so there is no password to keep.
                 </p>
+              </Section>
+              <Section label="already on matrix" icon={Link2}>
+                <p className="text-[13px] leading-relaxed text-[var(--muted)]">
+                  If you already use Matrix somewhere else, add that address and it gets an invite to
+                  the {edition.instance.name} members room too. Accept it in the app you usually use.
+                </p>
+                <form onSubmit={linkElsewhere} className="mt-3 flex items-center gap-2">
+                  <input
+                    value={elsewhere}
+                    onChange={(e) => setElsewhere(e.target.value)}
+                    placeholder="@alice:matrix.org"
+                    spellCheck={false}
+                    aria-label="Your Matrix address elsewhere"
+                    className={`${inputClass} font-mono min-w-0 flex-1`}
+                  />
+                  <Button type="submit" size="md" icon={Link2} busy={linking} disabled={!MXID.test(elsewhere.trim())}>
+                    Send invite
+                  </Button>
+                </form>
+                {linked && <Notice tone="ok">Invite sent to {linked}.</Notice>}
+                {linkError && <Notice tone="danger">{linkError}</Notice>}
               </Section>
               <Section label="this device">
                 <Button variant="danger" size="md" icon={LogOut} onClick={signOut}>
