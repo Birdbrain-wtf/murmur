@@ -39,6 +39,12 @@ mod chain;
 // Keep a copy: the optional full node, run as a child process (ADR 0068, step 2).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod node;
+// The exchange engine: Decred's DEX client, fetched, checked and run as a child process.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod exchange;
+
+// Calls: the window may use the microphone and camera.
+mod media;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -54,14 +60,20 @@ pub fn run() {
         chain::chain_rpc,
         node::node_status,
         node::node_set_enabled,
-        node::node_remove
+        node::node_remove,
+        exchange::exchange_status,
+        exchange::exchange_set_enabled,
+        exchange::exchange_api,
+        exchange::exchange_book
     ]);
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder
         .manage(chain::ChainState(Default::default(), Default::default()))
-        .manage(node::NodeState(Default::default()));
+        .manage(node::NodeState(Default::default()))
+        .manage(exchange::ExchangeState(Default::default()));
     builder
         .setup(|_app| {
+            media::allow_calls(_app);
             // Self-update is desktop-only; mobile updates via the app store.
             #[cfg(desktop)]
             _app.handle()
@@ -76,6 +88,8 @@ pub fn run() {
                     if let Some(d) = &dir {
                         let _ = std::fs::create_dir_all(d);
                         *handle.state::<node::NodeState>().0.lock().unwrap() = Some(node::Node::start(d.clone()));
+                        *handle.state::<exchange::ExchangeState>().0.lock().unwrap() =
+                            Some(exchange::Engine::start(d.clone(), handle.config().identifier.clone()));
                     }
                     let state = handle.state::<chain::ChainState>();
                     match chain::Chain::start(dir) {
@@ -95,6 +109,9 @@ pub fn run() {
                 use tauri::Manager;
                 if let Some(n) = _handle.state::<node::NodeState>().0.lock().unwrap().as_ref() {
                     n.stop();
+                }
+                if let Some(e) = _handle.state::<exchange::ExchangeState>().0.lock().unwrap().as_ref() {
+                    e.stop();
                 }
             }
         });

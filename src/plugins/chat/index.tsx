@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   MessageSquare,
   Hash,
@@ -8,6 +8,8 @@ import {
   Fingerprint,
   UserRound,
   Link2,
+  Phone,
+  Video,
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { edition, groupWord } from "../../edition";
@@ -24,6 +26,7 @@ import {
   Dot,
 } from "../../ui";
 import { participate, today } from "../../identity/participation";
+import { CallStage, joinCall, leaveCall, useCallers, type CallState } from "./call";
 
 /**
  * Chat plugin — Matrix.
@@ -41,7 +44,7 @@ import { participate, today } from "../../identity/participation";
  * even if the SDK has browser-build quirks. v0.1 runs without e2ee (no olm /
  * rust-crypto), so it speaks plaintext rooms; encrypted rooms show a notice.
  * Federation between Decent instances rides on Matrix rooms, which is what the
- * `network` plugin builds on.
+ * `network` plugin builds on. Voice and video calls in a room: ./call.tsx.
  */
 
 interface RoomLite {
@@ -60,6 +63,9 @@ interface EventLite {
   body: string;
   ts: number;
   mine: boolean;
+  /** shown the moment it is sent, before the server has it */
+  pending?: boolean;
+  txnId?: string;
 }
 
 const SESSION_KEY = "murmur.matrix.session.v1";
@@ -88,6 +94,12 @@ function Panel({ identity, open }: PluginContext) {
   const [linkError, setLinkError] = useState<string | null>(null);
   const signedIn = !!(identity.signedIn && identity.session);
 
+  const [call, setCall] = useState<CallState | null>(null);
+  const [calling, setCalling] = useState(false);
+  const callRef = useRef<CallState | null>(null);
+  callRef.current = call;
+  const callers = useCallers(phase === "ready" ? client : null, activeRoom);
+
   // Restore a persisted session on mount, or open chat with the passkey session
   // if there is none yet.
   useEffect(() => {
@@ -103,6 +115,9 @@ function Panel({ identity, open }: PluginContext) {
       void openWithPasskey();
     }
     return () => {
+      // Leaving Chat hangs up, so nobody stays in a call they cannot see.
+      const c = callRef.current;
+      if (c) void c.live.disconnect();
       try {
         client?.stopClient?.();
       } catch {
@@ -121,10 +136,17 @@ function Panel({ identity, open }: PluginContext) {
     setError(null);
     try {
       const sdk: any = await import("matrix-js-sdk");
+      // Calls name the device they come from, so ask the server which one this token is.
+      const who = await fetch(`${creds.baseUrl.replace(/\/$/, "")}/_matrix/client/v3/account/whoami`, {
+        headers: { Authorization: `Bearer ${creds.accessToken}`, Accept: "application/json" },
+      })
+        .then((r) => (r.ok ? r.json() : {}))
+        .catch(() => ({})) as { device_id?: string };
       const c = sdk.createClient({
         baseUrl: creds.baseUrl,
         accessToken: creds.accessToken,
         userId: creds.userId,
+        deviceId: who.device_id,
       });
 
       c.on(sdk.ClientEvent.Sync, (state: string) => {
@@ -223,43 +245,65 @@ function Panel({ identity, open }: PluginContext) {
   useEffect(() => {
     if (!client || !activeRoom) return;
     let cancelled = false;
+    let detach: (() => void) | undefined;
     (async () => {
       const sdk: any = await import("matrix-js-sdk");
+      if (cancelled) return;
       const room = client.getRoom(activeRoom);
       if (!room) return;
       const me = client.getUserId();
-      const tl: EventLite[] = room
-        .getLiveTimeline()
-        .getEvents()
-        .filter((ev: any) => ev.getType() === "m.room.message")
-        .map((ev: any) => ({
-          id: ev.getId(),
-          sender: ev.getSender(),
-          body: ev.getContent()?.body ?? "",
-          ts: ev.getTs(),
-          mine: ev.getSender() === me,
-        }));
-      if (!cancelled) setEvents(tl);
+      const lite = (ev: any): EventLite => ({
+        id: ev.getId(),
+        sender: ev.getSender(),
+        body: ev.getContent()?.body ?? "",
+        ts: ev.getTs(),
+        mine: ev.getSender() === me,
+        txnId: ev.getTxnId?.() ?? ev.getUnsigned?.()?.transaction_id,
+      });
+      setEvents(
+        room
+          .getLiveTimeline()
+          .getEvents()
+          .filter((ev: any) => ev.getType() === "m.room.message")
+          .map(lite),
+      );
 
+      // Our own message is already on screen from send(); when the SDK or the
+      // server hands it back, it replaces that line rather than adding another.
       const onTl = (ev: any, r: any) => {
         if (r?.roomId !== activeRoom) return;
         if (ev.getType() !== "m.room.message") return;
-        setEvents((prev) => [
-          ...prev,
-          {
-            id: ev.getId(),
-            sender: ev.getSender(),
-            body: ev.getContent()?.body ?? "",
-            ts: ev.getTs(),
-            mine: ev.getSender() === me,
-          },
-        ]);
+        const next = lite(ev);
+        setEvents((prev) => {
+          const i = prev.findIndex(
+            (p) => p.id === next.id || (!!next.txnId && p.txnId === next.txnId),
+          );
+          if (i < 0) return [...prev, next];
+          const copy = prev.slice();
+          copy[i] = { ...next, pending: prev[i].pending && ev.status != null };
+          return copy;
+        });
+      };
+      const onEcho = (ev: any, r: any) => {
+        if (r?.roomId !== activeRoom) return;
+        const txnId = ev.getTxnId?.();
+        if (!txnId) return;
+        setEvents((prev) =>
+          prev.map((p) =>
+            p.txnId === txnId ? { ...p, id: ev.getId(), pending: ev.status != null } : p,
+          ),
+        );
       };
       client.on(sdk.RoomEvent.Timeline, onTl);
-      return () => client.off(sdk.RoomEvent.Timeline, onTl);
+      client.on(sdk.RoomEvent.LocalEchoUpdated, onEcho);
+      detach = () => {
+        client.off(sdk.RoomEvent.Timeline, onTl);
+        client.off(sdk.RoomEvent.LocalEchoUpdated, onEcho);
+      };
     })();
     return () => {
       cancelled = true;
+      detach?.();
     };
   }, [client, activeRoom]);
 
@@ -304,17 +348,60 @@ function Panel({ identity, open }: PluginContext) {
     const body = draft.trim();
     if (!body || !client || !activeRoom) return;
     setDraft("");
+    // Show it straight away. The server's copy takes the same place when it lands.
+    const txnId = client.makeTxnId();
+    const me = client.getUserId();
+    setEvents((prev) => [
+      ...prev,
+      {
+        id: `~${activeRoom}:${txnId}`,
+        sender: me,
+        body,
+        ts: Date.now(),
+        mine: true,
+        pending: true,
+        txnId,
+      },
+    ]);
     try {
-      await client.sendTextMessage(activeRoom, body);
+      await client.sendTextMessage(activeRoom, body, txnId);
       // Speaking in a room is taking part: a signed check-in for this room today.
       // Reading is not, so opening a room records nothing (ADR 0069).
       void participate("chat", `chat:${activeRoom}@${today()}`);
     } catch (err) {
+      // Take the line back off and return the words to the box, so nothing
+      // looks sent that was not.
+      setEvents((prev) => prev.filter((p) => p.txnId !== txnId));
+      setDraft((d) => d || body);
       setError(err instanceof Error ? err.message : "send failed");
     }
   }
 
+  async function startCall(video: boolean) {
+    if (!client || !activeRoom || calling) return;
+    if (call) await hangUp();
+    setCalling(true);
+    setError(null);
+    try {
+      setCall(await joinCall(client, activeRoom, video));
+      // Joining a call is taking part in the room, the same as speaking in it.
+      void participate("chat", `chat:${activeRoom}@${today()}`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "The call did not start.");
+    } finally {
+      setCalling(false);
+    }
+  }
+
+  const hangUp = useCallback(async () => {
+    const c = callRef.current;
+    if (!c) return;
+    setCall(null);
+    await leaveCall(client, c);
+  }, [client]);
+
   async function signOut() {
+    await hangUp();
     try {
       await client?.logout?.();
     } catch {
@@ -510,7 +597,38 @@ function Panel({ identity, open }: PluginContext) {
               <div className="flex items-center gap-2 border-b border-[var(--line)] px-8 py-3">
                 <Hash className="h-4 w-4 text-[var(--faint)]" />
                 <span className="font-tight text-sm font-medium">{activeName}</span>
+                {call?.roomId !== activeRoom && activeRoom && (
+                  <span className="ml-auto flex items-center gap-2">
+                    {callers > 0 && (
+                      <span className="flex items-center gap-1.5 font-mono text-[11px] text-[var(--muted)]">
+                        <Dot tone="live" />
+                        {callers} in a call
+                      </span>
+                    )}
+                    <Button icon={Phone} busy={calling} onClick={() => void startCall(false)}>
+                      {callers > 0 ? "Join with voice" : "Voice call"}
+                    </Button>
+                    <Button icon={Video} busy={calling} onClick={() => void startCall(true)}>
+                      {callers > 0 ? "Join with video" : "Video call"}
+                    </Button>
+                  </span>
+                )}
               </div>
+              {call && call.roomId === activeRoom && (
+                <CallStage call={call} name={shortSender} onLeave={hangUp} />
+              )}
+              {call && call.roomId !== activeRoom && (
+                <div className="flex items-center gap-2 border-b border-[var(--line)] px-8 py-2 text-[13px] text-[var(--muted)]">
+                  <Dot tone="live" />
+                  In a call in {rooms.find((r) => r.id === call.roomId)?.name ?? "another room"}.
+                  <Button variant="quiet" onClick={() => setActiveRoom(call.roomId)}>
+                    Go back
+                  </Button>
+                  <Button variant="quiet" onClick={() => void hangUp()}>
+                    Leave
+                  </Button>
+                </div>
+              )}
               <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-8 py-4">
                 <div className="flex flex-col gap-3">
                   {events.map((ev) => (
@@ -529,7 +647,12 @@ function Panel({ identity, open }: PluginContext) {
                           })}
                         </span>
                       </div>
-                      <p className="text-[14px] leading-relaxed">{ev.body}</p>
+                      <p
+                        className="text-[14px] leading-relaxed"
+                        style={ev.pending ? { opacity: 0.55 } : undefined}
+                      >
+                        {ev.body}
+                      </p>
                     </div>
                   ))}
                 </div>

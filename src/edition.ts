@@ -34,6 +34,11 @@ export interface Edition {
   /** the plugins this edition offers, which are also what a fresh install has.
    *  `agent` is in every edition: the collective's own agent, named after it */
   plugins: string[];
+  /** plugins offered in the catalog but not installed on a fresh client; a
+   *  member adds them from Plugins. Used for surfaces still on test money */
+  optional?: string[];
+  /** the exchange market a member is offered first (lab/exchange); testnet only */
+  exchangeMarket?: string;
   /** the surface the window opens on */
   home: string;
   /** passkey sign-in through the member's browser: the app asks `pair` for a
@@ -57,6 +62,8 @@ const EDITIONS: Record<EditionId, Edition> = {
     vaultSync: false,
     vaultName: "this device",
     plugins: ["agent", "meet", "chat", "pay", "magazine"],
+    optional: ["exchange"],
+    exchangeMarket: "dex.birdbrain.wtf:7232",
     home: "agent",
     signIn: {
       app: "murmur",

@@ -1,7 +1,7 @@
 {
   "name": "murmur",
   "private": true,
-  "version": "0.4.2",
+  "version": "0.4.3",
   "type": "module",
   "description": "Murmur, Birdbrain's open app: notes, people and groups in one window, on your own machine.",
   "scripts": {
@@ -20,6 +20,7 @@
     "@tauri-apps/plugin-process": "~2.4.0",
     "@tauri-apps/plugin-updater": "~2.13.0",
     "codemirror": "^6.0.2",
+    "livekit-client": "2.22.4",
     "lucide-react": "^0.460.0",
     "matrix-js-sdk": "^34.11.1",
     "react": "^18.3.1",

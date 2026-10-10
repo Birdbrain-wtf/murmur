@@ -63,7 +63,13 @@ function isPlugin(x: unknown): x is MurmurModule {
  * Set per edition (`../edition.ts`). Murmur and Decent: chat, meet, pay,
  * magazine. FTTF: watch, chat.
  */
-export const RELEASE_PLUGINS = edition.plugins;
+export const RELEASE_PLUGINS = [
+  ...edition.plugins,
+  ...(edition.optional ?? []),
+  // Plugins held back from every edition can be surfaced in a local build to try
+  // them: VITE_EXTRA_PLUGINS=exchange bun run dev
+  ...String(import.meta.env.VITE_EXTRA_PLUGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+];
 
 export const pluginCatalog: MurmurModule[] = Object.values(discovered)
   .flatMap((mod) => Object.values(mod))

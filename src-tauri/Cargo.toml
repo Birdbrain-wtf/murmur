@@ -1,6 +1,6 @@
 [package]
 name = "murmur"
-version = "0.4.2"
+version = "0.4.3"
 description = "Murmur and its editions: a plugin host over Matrix, Seeds and the group's memory"
 authors = ["Birdbrain"]
 edition = "2021"
@@ -62,6 +62,9 @@ keyring = { version = "3", features = ["windows-native"] }
 # "linux-native", which is the kernel keyring and is emptied at every reboot.
 [target.'cfg(target_os = "linux")'.dependencies]
 keyring = { version = "3", features = ["sync-secret-service", "crypto-rust"] }
+# Calls: WebKitGTK keeps WebRTC off and refuses the microphone and camera unless the
+# app switches them on (src/media.rs). Same version the webview already uses.
+webkit2gtk = { version = "2.0", features = ["v2_40"] }
 
 [profile.release]
 panic = "abort"
