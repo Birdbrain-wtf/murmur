@@ -142,6 +142,22 @@ fn new_password() -> Result<String, String> {
     Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// Write a file only this user can read, replacing it in one step.
+fn write_private(path: &std::path::Path, body: &str) -> Result<(), String> {
+    use std::io::Write;
+    let tmp = path.with_extension("tmp");
+    let mut o = std::fs::OpenOptions::new();
+    o.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        o.mode(0o600);
+    }
+    let mut f = o.open(&tmp).map_err(|e| e.to_string())?;
+    f.write_all(body.as_bytes()).and_then(|_| f.sync_all()).map_err(|e| e.to_string())?;
+    std::fs::rename(&tmp, path).map_err(|e| e.to_string())
+}
+
 impl Engine {
     pub fn start(data_dir: PathBuf, keyring_service: String) -> Arc<Engine> {
         Self::start_with(data_dir, keyring_service, PUBKEY.into(), MANIFEST.into())
@@ -231,16 +247,27 @@ impl Engine {
         if let Ok(p) = std::env::var("EXCHANGE_TEST_PASSWORD") {
             return Ok(p);
         }
-        let entry = keyring::Entry::new(&self.keyring_service, PASSWORD_ENTRY).map_err(|e| e.to_string())?;
-        match entry.get_password() {
-            Ok(p) => Ok(p),
-            Err(keyring::Error::NoEntry) => {
-                let p = new_password()?;
-                entry.set_password(&p).map_err(|e| e.to_string())?;
-                Ok(p)
+        // The password lives in a file beside the engine's own data, readable only
+        // by this user. The app is ad-hoc signed, so to macOS every update is a new
+        // app, and a Keychain item read at every launch raised the login-password
+        // box after every update. Testnet only: move it back to the Keychain once
+        // the app is signed with an Apple Developer ID.
+        let file = self.dir.join("app-password");
+        if let Ok(p) = std::fs::read_to_string(&file) {
+            let p = p.trim().to_string();
+            if !p.is_empty() {
+                return Ok(p);
             }
-            Err(e) => Err(format!("couldn't read the exchange password from this computer's secure store: {e}")),
         }
+        // Builds up to 0.4.4 kept it in the Keychain: read it once (the box shows one
+        // last time) so the existing wallet still opens, then never again.
+        let p = match keyring::Entry::new(&self.keyring_service, PASSWORD_ENTRY).and_then(|e| e.get_password()) {
+            Ok(p) => p,
+            Err(keyring::Error::NoEntry) => new_password()?,
+            Err(e) => return Err(format!("couldn't read the exchange password from this computer's secure store: {e}")),
+        };
+        write_private(&file, &p)?;
+        Ok(p)
     }
 
     fn fetch_in_background(self: Arc<Self>) {
