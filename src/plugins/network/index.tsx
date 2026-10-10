@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Network, Radio, Plus, ArrowUpRight, Lock } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
+import { issues } from "../../host/support";
 
 /**
  * Network plugin — federation.
@@ -153,6 +154,7 @@ export const networkPlugin: MurmurPlugin = {
   icon: Network,
   order: 50,
   kind: "plugin",
+  support: issues("network"),
   needsUpgrade: true,
   backend: "Inter-instance federation",
   Panel,

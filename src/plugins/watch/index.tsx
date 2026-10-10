@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Play, RotateCw, ArrowUpRight } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
+import { email } from "../../host/support";
 import { openInBrowser } from "../../identity/passkey";
 import { Button, Page, PageHeader } from "../../ui";
 
@@ -72,6 +73,7 @@ export const watchPlugin: MurmurPlugin = {
   icon: Play,
   order: 5,
   kind: "plugin",
+  support: email("watch"),
   backend: "fttf.decent.partners (live channel)",
   Panel,
 };

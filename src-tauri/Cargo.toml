@@ -1,6 +1,6 @@
 [package]
 name = "murmur"
-version = "0.4.5"
+version = "0.4.7"
 description = "Murmur and its editions: a plugin host over Matrix, Seeds and the group's memory"
 authors = ["Birdbrain"]
 edition = "2021"
@@ -72,3 +72,7 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# Tests only: print the light client's own log (it is already in the tree through smoldot).
+[dev-dependencies]
+log = "0.4"

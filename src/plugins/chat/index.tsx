@@ -12,6 +12,7 @@ import {
   Video,
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
+import { issues } from "../../host/support";
 import { edition, groupWord } from "../../edition";
 import {
   Page,
@@ -701,6 +702,7 @@ export const chatPlugin: MurmurPlugin = {
   icon: MessageSquare,
   order: 20,
   kind: "plugin",
+  support: issues("chat"),
   backend: "Matrix homeserver",
   Panel,
 };

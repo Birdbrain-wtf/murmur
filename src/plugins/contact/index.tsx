@@ -1,5 +1,6 @@
 import { Mail, ShieldCheck, Server, KeyRound } from "lucide-react";
 import type { MurmurModule, PluginContext } from "../../host/types";
+import { issues } from "../../host/support";
 
 /**
  * Contact plugin — email.
@@ -94,6 +95,7 @@ export const contactPlugin: MurmurModule = {
   icon: Mail,
   order: 40,
   kind: "plugin",
+  support: issues("contact"),
   backend: "Self-hosted email",
   Panel,
 };

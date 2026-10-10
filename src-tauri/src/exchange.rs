@@ -370,7 +370,35 @@ impl Engine {
         Ok(version)
     }
 
+    /// An engine left running by an earlier session of this app (killed, crashed or
+    /// replaced by an update before it could stop it) still holds the data folder, and
+    /// a new one then exits at once with "database is already being used". Stop it first.
+    #[cfg(unix)]
+    fn stop_leftover(&self) {
+        let pid_file = self.dir.join("engine.pid");
+        let Some(pid) = std::fs::read_to_string(&pid_file).ok().and_then(|s| s.trim().parse::<u32>().ok()) else { return };
+        let _ = std::fs::remove_file(&pid_file);
+        let alive = |pid: u32| {
+            Command::new("ps").args(["-p", &pid.to_string(), "-o", "comm="]).output().ok()
+                .map(|o| String::from_utf8_lossy(&o.stdout).contains("bisonw"))
+                .unwrap_or(false)
+        };
+        if !alive(pid) {
+            return;
+        }
+        let _ = Command::new("kill").args(["-TERM", &pid.to_string()]).status();
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while Instant::now() < deadline && alive(pid) {
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        if alive(pid) {
+            let _ = Command::new("kill").args(["-KILL", &pid.to_string()]).status();
+        }
+    }
+
     fn spawn(&self, version: &str) -> Result<Running, String> {
+        #[cfg(unix)]
+        self.stop_leftover();
         let port = free_port().ok_or("no free port on this computer")?;
         let log = std::fs::File::create(self.dir.join("engine.log")).map_err(|e| e.to_string())?;
         let child = Command::new(self.dir.join(exe_name(version)))
@@ -384,11 +412,13 @@ impl Engine {
             .stderr(log)
             .spawn()
             .map_err(|e| format!("the exchange engine wouldn't start: {e}"))?;
+        let _ = std::fs::write(self.dir.join("engine.pid"), child.id().to_string());
         Ok(Running { child, port, started: Instant::now(), cookies: None })
     }
 
     pub fn stop(&self) {
         let Some(mut r) = self.running.lock().unwrap().take() else { return };
+        let _ = std::fs::remove_file(self.dir.join("engine.pid"));
         #[cfg(unix)]
         {
             let _ = Command::new("kill").args(["-TERM", &r.child.id().to_string()]).status();
@@ -513,12 +543,15 @@ impl Engine {
         if let Some(code) = exited {
             self.running.lock().unwrap().take();
             *self.crashes.lock().unwrap() += 1;
-            let tail = std::fs::read_to_string(self.dir.join("engine.log"))
-                .unwrap_or_default()
+            // The engine logs to stdout, which is discarded, and prints a fatal start-up
+            // error to stderr (engine.log) as a bare line with no level tag.
+            let log = std::fs::read_to_string(self.dir.join("engine.log")).unwrap_or_default();
+            let tail = log
                 .lines()
                 .rev()
                 .find(|l| l.contains("[ERR]") || l.contains("[CRT]"))
-                .map(|l| l.to_string());
+                .or_else(|| log.lines().rev().find(|l| !l.trim().is_empty()))
+                .map(|l| l.trim().to_string());
             self.status.lock().unwrap().error =
                 Some(format!("the exchange engine stopped ({code}){}", tail.map(|t| format!(": {t}")).unwrap_or_default()));
         }

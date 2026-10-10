@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeftRight, Copy, KeyRound, Power, RefreshCw, Store, Wallet } from "lucide-react";
 import type { MurmurModule, PluginContext } from "../../host/types";
+import { issues } from "../../host/support";
 import { edition } from "../../edition";
 import {
   Button,
@@ -468,6 +469,8 @@ export const exchangePlugin: MurmurModule = {
   icon: ArrowLeftRight,
   order: 27,
   kind: "plugin",
+  lab: true,
+  support: issues("exchange"),
   backend: "An engine on this computer",
   Panel,
 };

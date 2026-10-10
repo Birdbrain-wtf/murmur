@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Video, ArrowUpRight, CalendarPlus, Radio, Sparkles, MapPin } from "lucide-react";
 import type { MurmurModule, PluginContext } from "../../host/types";
+import { issues } from "../../host/support";
 import { Button, Card, Code, Eyebrow, Field, Notice, Page, PageBody, PageHeader, Status, inputClass } from "../../ui";
 import {
   checkInAtPlace,
@@ -387,6 +388,7 @@ export const meetPlugin: MurmurModule = {
   icon: Video,
   order: 15,
   kind: "plugin",
+  support: issues("meet"),
   backend: "Video calls we host",
   Panel,
 };

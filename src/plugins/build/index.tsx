@@ -9,6 +9,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
+import { issues } from "../../host/support";
 
 /**
  * Build plugin — turn a user into a maintainer.
@@ -367,6 +368,7 @@ export const buildPlugin: MurmurPlugin = {
   icon: Hammer,
   order: 60,
   kind: "plugin",
+  support: issues("build"),
   backend: "Pluggable agent (your Zo / BYO keys)",
   Panel,
 };

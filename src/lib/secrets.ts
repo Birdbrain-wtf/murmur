@@ -104,6 +104,19 @@ function buildTag(): Promise<string> {
 }
 const appName = async (name: string) => `app.${await buildTag()}.${name}`;
 
+/**
+ * For keys that hold the member's money, such as Swap's recovery words. Never
+ * listed in Settings (deleting one there would lose an account) and not filed
+ * per build, because a new build that found nothing would lose it too. So after
+ * an update macOS may ask once for the login password when the key is first
+ * read, which is only ever at the moment of signing. Gone with a Developer ID.
+ */
+export const keySecret = {
+  get: (name: string) => getSecret(`key.${name}`),
+  set: (name: string, value: string) => rawSet(`key.${name}`, value),
+  delete: (name: string) => rawDelete(`key.${name}`),
+};
+
 /** For tokens the app holds for itself, such as the operations sign-in. */
 export const appSecret = {
   get: async (name: string) => getSecret(await appName(name)),

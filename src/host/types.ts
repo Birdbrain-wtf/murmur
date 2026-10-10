@@ -11,7 +11,7 @@ import type { LucideIcon } from "lucide-react";
  * (Jitsi), `contact` (email) and `network` (federation). All implement this
  * one interface, so the shell treats them uniformly.
  */
-export interface MurmurModule {
+interface ModuleBase {
   /** stable id, kebab-case (e.g. "chat", "understand", "network") */
   id: string;
   /** human label shown in the rail */
@@ -25,11 +25,6 @@ export interface MurmurModule {
   /** the panel rendered when this module is active */
   Panel: ComponentType<PluginContext>;
   /**
-   * "core" modules are always mounted (identity, notes). "plugin" modules are
-   * installed by the user over time from the catalog.
-   */
-  kind: "core" | "plugin";
-  /**
    * What this module binds to — surfaced in the catalog (e.g. "Matrix
    * homeserver", "Self-hosted email"). Sovereign targets the user owns.
    */
@@ -41,7 +36,33 @@ export interface MurmurModule {
   needsUpgrade?: boolean;
   /** optional live status dot for the rail (e.g. connected / syncing) */
   useStatus?: () => PluginStatus;
+  /**
+   * Lab: early, experimental, here for testing (Swap and Exchange, which move
+   * test money only). It may change or go away. The catalog, the rail and the
+   * Suggest panel say so. Drop the flag when the plugin is ready for real use.
+   */
+  lab?: boolean;
 }
+
+/**
+ * Where someone goes for help with this plugin, or to report a bug in it:
+ * a specific route, alongside the general Suggest button. Build one with
+ * `issues()` or `email()` from `./support`.
+ */
+export interface Support {
+  /** what the link says, e.g. "Report it on GitHub" */
+  label: string;
+  href: string;
+}
+
+/**
+ * "core" modules are always mounted (identity, notes). "plugin" modules are
+ * installed by the user over time from the catalog, and every plugin must say
+ * where its help and bug reports go.
+ */
+export type MurmurModule =
+  | (ModuleBase & { kind: "core"; support?: Support })
+  | (ModuleBase & { kind: "plugin"; support: Support });
 
 /** Back-compat alias — modules were formerly all called "plugins". */
 export type MurmurPlugin = MurmurModule;

@@ -8,6 +8,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
+import { issues } from "../../host/support";
 import { useSkin, encodeSkin, EMPTY_SKIN } from "../../host/useSkin";
 import { edition } from "../../edition";
 import { Page, PageHeader, PageBody, Section, Card, Field, inputClass, Button } from "../../ui";
@@ -319,6 +320,7 @@ export const invitePlugin: MurmurPlugin = {
   icon: UserPlus,
   order: 70,
   kind: "plugin",
+  support: issues("invite"),
   backend: "Peer-to-peer (signed build · this instance)",
   Panel,
 };

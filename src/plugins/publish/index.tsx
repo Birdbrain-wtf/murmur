@@ -9,6 +9,7 @@ import {
   ArrowUpRight,
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
+import { issues } from "../../host/support";
 
 /**
  * Publish plugin — turn a user into a contributor.
@@ -425,6 +426,7 @@ export const publishPlugin: MurmurPlugin = {
   icon: PenLine,
   order: 65,
   kind: "plugin",
+  support: issues("publish"),
   backend: "Decent magazine (zine.decent.partners)",
   Panel,
 };

@@ -8,6 +8,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
+import { issues } from "../../host/support";
 import { edition, groupWord } from "../../edition";
 import { Button, Notice, Page, PageHeader, Waiting } from "../../ui";
 import { getModule } from "../../host/registry";
@@ -536,6 +537,7 @@ export const agentPlugin: MurmurPlugin = {
   icon: Sparkles,
   order: 1,
   kind: "plugin",
+  support: issues("agent"),
   backend: `${edition.instance.name}'s own agent`,
   Panel,
 };

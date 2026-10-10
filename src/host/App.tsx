@@ -124,6 +124,8 @@ export default function App() {
             pluginTitle={active.title}
             identity={identity}
             instance={skinnedInstance}
+            lab={active.lab}
+            support={active.support}
           />
         </main>
       </div>
@@ -161,7 +163,7 @@ function RailButton({
   return (
     <button
       onClick={() => onClick(mod.id)}
-      title={`${mod.title}: ${mod.tagline}`}
+      title={`${mod.title}${mod.lab ? " (lab)" : ""}: ${mod.tagline}`}
       data-active={active}
       className="prism-hover group relative flex h-11 w-11 items-center justify-center rounded-[var(--radius)] text-[var(--muted)] transition hover:bg-[var(--raise)] data-[active=true]:bg-[var(--raise)] data-[active=true]:text-[var(--fg)]"
     >
@@ -206,6 +208,8 @@ function Catalog({
             <p className="text-xs text-[var(--muted)]">
               {installed.length} of {pluginCatalog.length} added. Notes, Settings
               and Profile are always here.
+              {pluginCatalog.some((p) => p.lab) &&
+                " Lab plugins are early and here for testing, so they may change or go away."}
             </p>
           </div>
           <button
@@ -233,6 +237,7 @@ function Catalog({
                     <span className="font-tight text-sm font-medium">
                       {p.title}
                     </span>
+                    {p.lab && <Status>lab</Status>}
                     {p.needsUpgrade && <Status tone="warn">needs the larger app</Status>}
                   </div>
                   <div className="mt-0.5 truncate text-xs text-[var(--muted)]">

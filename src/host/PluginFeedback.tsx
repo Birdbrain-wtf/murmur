@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { MessageSquarePlus, X, Check, Bug, Lightbulb, Type } from "lucide-react";
+import { MessageSquarePlus, X, Check, Bug, Lightbulb, Type, ArrowUpRight, FlaskConical } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import type { Identity, InstanceConfig } from "./types";
+import type { Identity, InstanceConfig, Support } from "./types";
 import { isTauri } from "./useUpdater";
 import { Button } from "../ui";
+import { openInBrowser } from "../identity/passkey";
 
 /**
  * The host-level "suggest a change" affordance.
@@ -13,6 +14,10 @@ import { Button } from "../ui";
  * A suggestion POSTs to `/api/murmur/feedback`, tagged with the active plugin,
  * the instance, and who sent it, and lands in the append-only backlog ledger.
  * Fire-and-forget: the panel never blocks on it.
+ *
+ * Under the form sits the plugin's own route back (`support` on the module):
+ * where to get help or report a bug in that plugin and get an answer. A lab
+ * plugin says so at the top.
  */
 
 type Kind = "idea" | "bug" | "copy";
@@ -41,11 +46,15 @@ export function PluginFeedback({
   pluginTitle,
   identity,
   instance,
+  lab,
+  support,
 }: {
   pluginId: string;
   pluginTitle: string;
   identity: Identity;
   instance: InstanceConfig;
+  lab?: boolean;
+  support?: Support;
 }) {
   const [open, setOpen] = useState(false);
   const [kind, setKind] = useState<Kind>("idea");
@@ -119,6 +128,15 @@ export function PluginFeedback({
             </button>
           </div>
 
+          {lab && (
+            <div className="flex items-start gap-2 border-b border-[var(--line)] px-4 py-2.5 text-[11px] leading-relaxed text-[var(--muted)]">
+              <FlaskConical className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>
+                {pluginTitle} is in the lab: early, for testing, and it may change. Bug reports help most.
+              </span>
+            </div>
+          )}
+
           {phase === "sent" ? (
             <div className="flex items-center gap-2 px-4 py-6 text-sm text-[var(--muted)]">
               <Check className="h-4 w-4 text-[var(--ok)]" />
@@ -166,6 +184,18 @@ export function PluginFeedback({
                 </Button>
               </div>
             </div>
+          )}
+
+          {support && (
+            <button
+              onClick={() => openInBrowser(support.href)}
+              className="prism-hover flex w-full items-center justify-between gap-2 border-t border-[var(--line)] px-4 py-2.5 text-left text-[11px] text-[var(--muted)] transition hover:text-[var(--fg)]"
+            >
+              <span className="min-w-0 truncate">
+                Help or a bug in {pluginTitle}? {support.label}
+              </span>
+              <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
+            </button>
           )}
         </div>
       )}

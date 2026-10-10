@@ -37,6 +37,7 @@ const exportName =
 
 const tpl = `import { Puzzle } from "lucide-react";
 import type { MurmurModule, PluginContext } from "../../host/types";
+import { issues } from "../../host/support";
 import { Page, PageHeader, PageBody, Card } from "../../ui";
 
 /**
@@ -72,6 +73,10 @@ export const ${exportName}: MurmurModule = {
   // chat 20, pay 25, meet 30, watch 35, contact 40, network 50. Adjust to taste.
   order: 60,
   kind: "plugin",
+  // early and for testing until it is ready for real use; drop this when it is
+  lab: true,
+  // where help and bug reports for this plugin go (issues, or email for a private plugin)
+  support: issues("${id}"),
   // backend: "Sovereign target this binds to",
   Panel,
 };

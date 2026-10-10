@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Newspaper, RotateCw, ArrowUpRight } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
+import { issues } from "../../host/support";
 import { openInBrowser } from "../../identity/passkey";
 import { Button, Page, PageHeader, Waiting } from "../../ui";
 
@@ -90,6 +91,7 @@ export const magazinePlugin: MurmurPlugin = {
   icon: Newspaper,
   order: 40,
   kind: "plugin",
+  support: issues("magazine"),
   backend: "Decent Magazine (live broadsheet)",
   Panel,
 };

@@ -42,6 +42,9 @@ mod node;
 // The exchange engine: Decred's DEX client, fetched, checked and run as a child process.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod exchange;
+// Asset Hub through a second light client, for Swap (KSM, or Paseo test money).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod hub;
 
 // Calls: the window may use the microphone and camera.
 mod media;
@@ -64,13 +67,16 @@ pub fn run() {
         exchange::exchange_status,
         exchange::exchange_set_enabled,
         exchange::exchange_api,
-        exchange::exchange_book
+        exchange::exchange_book,
+        hub::hub_start,
+        hub::hub_send
     ]);
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder
         .manage(chain::ChainState(Default::default(), Default::default()))
         .manage(node::NodeState(Default::default()))
-        .manage(exchange::ExchangeState(Default::default()));
+        .manage(exchange::ExchangeState(Default::default()))
+        .manage(hub::HubState::default());
     builder
         .setup(|_app| {
             media::allow_calls(_app);

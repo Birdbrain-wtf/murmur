@@ -9,6 +9,7 @@ import {
   EyeOff,
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
+import { issues } from "../../host/support";
 import {
   walletBalance,
   walletInit,
@@ -352,6 +353,7 @@ export const payPlugin: MurmurPlugin = {
   icon: Wallet,
   order: 25,
   kind: "plugin",
+  support: issues("pay"),
   backend: "Decent Pay",
   Panel,
 };

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Brain, CornerDownLeft, Loader2 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
+import { issues } from "../../host/support";
 import {
   birdbrainQuery,
   type BirdbrainHit,
@@ -187,6 +188,7 @@ export const understandPlugin: MurmurPlugin = {
   icon: Brain,
   order: 10,
   kind: "plugin",
+  support: issues("understand"),
   backend: "Birdbrain (Decent vault)",
   Panel,
 };
