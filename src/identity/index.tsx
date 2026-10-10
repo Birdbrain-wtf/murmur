@@ -3,6 +3,7 @@ import { Fingerprint, ShieldCheck, ArrowRight, ArrowUpRight, LogOut, Landmark, M
 import type { MurmurModule, PluginContext } from "../host/types";
 import { useIdentity } from "./useIdentity";
 import { edition } from "../edition";
+import { CollectivesSection } from "../host/Collectives";
 import { openInBrowser, startPairing, type Pairing, type SignedIn } from "./passkey";
 import { approve, supported as checkInsSupported, useParticipation } from "./participation";
 import { signInToOps, signOutOfOps, useOps } from "../lib/ops";
@@ -116,6 +117,7 @@ function Panel({ instance, open }: PluginContext) {
         />
         <PageBody>
           <PasskeySignIn onSignedIn={signIn} />
+          <CollectivesSection />
         </PageBody>
       </Page>
     );
@@ -162,6 +164,8 @@ function Panel({ instance, open }: PluginContext) {
             )}
           </List>
         </Section>
+
+        <CollectivesSection />
 
         {edition.ops && <OperatorRole open={open} />}
 

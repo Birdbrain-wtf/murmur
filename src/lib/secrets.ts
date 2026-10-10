@@ -7,9 +7,14 @@
  * the list of names sits in localStorage, so Settings can show what is saved
  * without reading anything back.
  *
+ * Each collective in the window files its values under its own prefix
+ * (`host/scope.ts`), so a key saved in one space is never read in another.
+ *
  * In a plain browser (dev) there is no secure store, so values live in memory
  * for the session and are gone on reload. `persistent` says which.
  */
+import { secretScope } from "../host/scope";
+
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 export const persistent = isTauri;
 
@@ -28,18 +33,21 @@ async function invoke<T>(cmd: string, args: Record<string, unknown>): Promise<T>
   return invoke<T>(cmd, args);
 }
 
-async function rawSet(name: string, value: string) {
+async function rawSet(bare: string, value: string) {
+  const name = secretScope() + bare;
   if (isTauri) await invoke("secret_set", { name, value });
   else memory.set(name, value);
 }
 
 /** Read a value. Plugins call this; Settings never does. */
-export async function getSecret(name: string): Promise<string | null> {
+export async function getSecret(bare: string): Promise<string | null> {
+  const name = secretScope() + bare;
   if (isTauri) return invoke<string | null>("secret_get", { name });
   return memory.get(name) ?? null;
 }
 
-async function rawDelete(name: string) {
+async function rawDelete(bare: string) {
+  const name = secretScope() + bare;
   if (isTauri) await invoke("secret_delete", { name });
   else memory.delete(name);
 }

@@ -15,7 +15,7 @@ import {
   EMPTY_SKIN,
   type Skin,
 } from "../host/useSkin";
-import { edition } from "../edition";
+import { app, edition } from "../edition";
 
 /**
  * Settings: this computer. Keys in the system's secure store, what version of
@@ -51,16 +51,16 @@ function About() {
       .then(setVersion)
       .catch(() => setVersion(null));
   }, []);
-  const host = new URL(edition.signIn.approve).host;
+  const host = new URL(app.signIn.approve).host;
   return (
     <Section label="This app" icon={Info}>
       <Card tone="quiet">
         <Row
-          title={`${edition.productName}${version ? ` ${version}` : ""}`}
+          title={`${app.productName}${version ? ` ${version}` : ""}`}
           status={isTauri ? <Status tone="ok">desktop app</Status> : <Status tone="warn">browser preview</Status>}
           detail={
             isTauri
-              ? `Updates are signed by ${edition.instance.name} and come from ${host}. When one is ready you'll see it at the bottom of the window.`
+              ? `Updates are signed by ${app.instance.name} and come from ${host}. When one is ready you'll see it at the bottom of the window.`
               : "The browser preview has no secure store, light client or updates. Use the desktop app for those."
           }
         />

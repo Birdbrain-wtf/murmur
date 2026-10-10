@@ -10,7 +10,14 @@
  *
  * Chosen at build time by `VITE_EDITION`. Unset means `decent`, so the existing
  * release path and every shipped install are unchanged.
+ *
+ * The build is the member's way in, not a wall: a member can add the other
+ * collectives they belong to (`joinable`) and switch between them in one window
+ * (`host/scope.ts`). Then `app` is the build and `edition` is the collective the
+ * window is in.
  */
+import { enterScope, joinedCollectives, storedCollective } from "./host/scope";
+
 export type EditionId = string;
 
 export interface Edition {
@@ -49,6 +56,9 @@ export interface Edition {
   /** the company's operations console (infra/services/ops-console), which the
    *  Operations and Files plugins read; editions without one leave it out */
   ops?: { base: string };
+  /** the other collectives a member of this app can add beside its own, each
+   *  opening in its own space with its own skin, plugins and sign-in */
+  joinable?: EditionId[];
 }
 
 const EDITIONS: Record<EditionId, Edition> = {
@@ -65,6 +75,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     optional: ["exchange"],
     exchangeMarket: "dex.birdbrain.wtf:7232",
     home: "agent",
+    joinable: ["decent"],
     signIn: {
       app: "murmur",
       pair: "https://birdbrain.wtf/api/chaos/app/pair",
@@ -84,6 +95,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     plugins: ["agent", "meet", "chat", "pay", "magazine", "operations", "files", "invite"],
     home: "agent",
     ops: { base: "https://www.decent.partners" },
+    joinable: ["murmur", "fttf"],
     // Decent's members, Decent's door: passkeys made at www.decent.partners. A
     // passkey belongs to the host that made it, so this is never Birdbrain's door.
     signIn: {
@@ -95,9 +107,32 @@ const EDITIONS: Record<EditionId, Edition> = {
   },
 };
 
-export const edition: Edition =
+/** The build: its name in the dock, its signing key, its update channel. It
+ *  never changes while the app runs. */
+export const app: Edition =
   EDITIONS[(import.meta.env.VITE_EDITION as EditionId) ?? "decent"] ??
   EDITIONS.decent;
+
+/** Collectives this app can open: its own first, then the ones it can add.
+ *  An id whose profile is not in this build (FTTF in the open core) is skipped. */
+export const collectives: Edition[] = [app.id, ...(app.joinable ?? [])]
+  .map((id) => EDITIONS[id])
+  .filter((c): c is Edition => !!c);
+
+/** The collectives in this member's switcher: the home one and those added. */
+export const memberOf: Edition[] = collectives.filter(
+  (c) => c.id === app.id || joinedCollectives().includes(c.id),
+);
+
+/**
+ * The collective the window is in (`host/scope.ts`). Everything a surface
+ * reads from here (the door, the plugins, the skin, the agent, the vault) is
+ * that collective's. Only `app` says which build is running.
+ */
+export const edition: Edition =
+  memberOf.find((c) => c.id === storedCollective) ?? app;
+
+enterScope(edition.id, app.id);
 
 /** What the member belongs to, in copy: an edition with an operations console
  *  is a company's, the rest are collectives'. Use this rather than "the flock",

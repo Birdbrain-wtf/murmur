@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { edition } from "../edition";
+import { app } from "../edition";
 
 /**
  * Self-update for the desktop build.
@@ -20,6 +20,7 @@ export type UpdateState =
   | { status: "downloading"; pct: number }
   | { status: "ready" }
   | { status: "uptodate" }
+  | { status: "updated"; version: string; notes: string }
   | { status: "error"; message: string };
 
 export const isTauri =
@@ -33,7 +34,12 @@ const isMobileWebview =
   /android|iphone|ipad|ipod/i.test(navigator.userAgent);
 
 // Every edition has its own signed channel; an edition can still opt out here.
-const canSelfUpdate = isTauri && !isMobileWebview && edition.selfUpdate;
+const canSelfUpdate = isTauri && !isMobileWebview && app.selfUpdate;
+
+// The notes of the update being installed, kept across the restart so the new
+// version can say once what changed. Shown only if the app really is now that
+// version, so a failed install never claims to have updated.
+const WHATS_NEW_KEY = "murmur.whats-new.v1";
 
 export function useUpdater() {
   const [state, setState] = useState<UpdateState>({ status: "idle" });
@@ -41,7 +47,7 @@ export function useUpdater() {
 
   const check = useCallback(async () => {
     if (!canSelfUpdate) return;
-    setState({ status: "checking" });
+    setState((s) => (s.status === "updated" ? s : { status: "checking" }));
     try {
       const { check } = await import("@tauri-apps/plugin-updater");
       const update = await check();
@@ -49,7 +55,7 @@ export function useUpdater() {
         setPending(update);
         setState({ status: "available", version: update.version, notes: update.body });
       } else {
-        setState({ status: "uptodate" });
+        setState((s) => (s.status === "updated" ? s : { status: "uptodate" }));
       }
     } catch (e) {
       setState({
@@ -65,6 +71,10 @@ export function useUpdater() {
       let downloaded = 0;
       let total = 0;
       setState({ status: "downloading", pct: 0 });
+      localStorage.setItem(
+        WHATS_NEW_KEY,
+        JSON.stringify({ version: pending.version, notes: pending.body ?? "" }),
+      );
       await pending.downloadAndInstall((ev: any) => {
         switch (ev.event) {
           case "Started":
@@ -93,6 +103,27 @@ export function useUpdater() {
   }, [pending]);
 
   const dismiss = useCallback(() => setState({ status: "idle" }), []);
+
+  // Just updated: say what changed, once. Then the usual check.
+  useEffect(() => {
+    if (!canSelfUpdate) return;
+    const raw = localStorage.getItem(WHATS_NEW_KEY);
+    if (!raw) return;
+    void (async () => {
+      try {
+        const saved = JSON.parse(raw);
+        const { getVersion } = await import("@tauri-apps/api/app");
+        if (saved?.version && saved.version === (await getVersion()) && saved.notes) {
+          setState((s) => (s.status === "idle" || s.status === "checking" || s.status === "uptodate"
+            ? { status: "updated", version: saved.version, notes: saved.notes }
+            : s));
+        }
+      } catch {
+        /* nothing to show */
+      }
+      localStorage.removeItem(WHATS_NEW_KEY);
+    })();
+  }, []);
 
   // Check shortly after launch so it never blocks first paint.
   useEffect(() => {

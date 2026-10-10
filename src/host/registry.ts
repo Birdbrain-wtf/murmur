@@ -2,7 +2,7 @@ import type { MurmurModule, InstanceConfig } from "./types";
 import { identitySurface } from "../identity";
 import { notesSurface } from "../notes";
 import { settingsSurface } from "../settings";
-import { edition } from "../edition";
+import { app, edition } from "../edition";
 
 /**
  * The instance this client is bound to. Each edition ships pointed at one
@@ -17,7 +17,9 @@ export const instance: InstanceConfig = {
   // must hit the origin directly, so fall back to the production host there.
   birdbrainBase:
     import.meta.env.VITE_BIRDBRAIN_BASE ??
-    (import.meta.env.DEV ? "" : edition.origin),
+    // The dev proxy only reaches the build's own collective; a space the member
+    // added goes straight to its origin.
+    (import.meta.env.DEV && edition.id === app.id ? "" : edition.origin),
   matrixHomeserver:
     import.meta.env.VITE_MATRIX_HOMESERVER ?? "https://matrix.decent.partners",
 };

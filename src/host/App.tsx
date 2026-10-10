@@ -13,6 +13,7 @@ import { useSkin } from "./useSkin";
 import { useUpdater } from "./useUpdater";
 import { UpdateBanner } from "./UpdateBanner";
 import { PluginFeedback } from "./PluginFeedback";
+import { CollectiveSwitcher } from "./Collectives";
 import { edition } from "../edition";
 import { Button, Status } from "../ui";
 
@@ -61,20 +62,7 @@ export default function App() {
       <div className="flex min-h-0 flex-1 flex-col-reverse md:flex-row">
         {/* ── rail / bottom tab bar ── */}
         <nav className="flex w-full shrink-0 flex-row items-center justify-around border-t border-[var(--line)] px-2 py-2 pb-[calc(0.5rem_+_env(safe-area-inset-bottom))] md:w-16 md:flex-col md:justify-start md:border-t-0 md:border-r md:px-0 md:py-4 md:pb-4">
-          <div
-            className="hidden h-10 w-10 items-center justify-center overflow-hidden rounded-[var(--radius)] border border-[var(--line-strong)] font-tight text-base font-semibold md:flex"
-            title={skinnedInstance.name}
-          >
-            {skinnedInstance.logo ? (
-              <img
-                src={skinnedInstance.logo}
-                alt={skinnedInstance.name}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              skinnedInstance.name.slice(0, 1)
-            )}
-          </div>
+          <CollectiveSwitcher name={skinnedInstance.name} logo={skinnedInstance.logo} />
 
           {/* body: core (notes) + installed plugins + add */}
           <div className="flex flex-1 flex-row items-center justify-around gap-1.5 md:mt-6 md:flex-col md:justify-start">

@@ -1,11 +1,13 @@
-import { Download, Loader2, RefreshCw, X } from "lucide-react";
+import { Download, Loader2, RefreshCw, Sparkles, X } from "lucide-react";
 import type { UpdateState } from "./useUpdater";
 import { Button } from "../ui";
-import { edition } from "../edition";
+import { app } from "../edition";
 
 /**
  * Floating update toast (bottom-right). Only renders for states the member
- * needs to act on; "checking" / "uptodate" / "idle" stay silent.
+ * needs to act on or should hear about; "checking" / "uptodate" / "idle" stay
+ * silent. The release notes come from the channel's latest.json (`notes`,
+ * written by `finish-release`): shown before the update, and once after it.
  */
 export function UpdateBanner({
   state,
@@ -16,7 +18,12 @@ export function UpdateBanner({
   onInstall: () => void;
   onDismiss: () => void;
 }) {
-  if (state.status !== "available" && state.status !== "downloading" && state.status !== "ready")
+  if (
+    state.status !== "available" &&
+    state.status !== "downloading" &&
+    state.status !== "ready" &&
+    state.status !== "updated"
+  )
     return null;
 
   return (
@@ -29,7 +36,7 @@ export function UpdateBanner({
               <div>
                 <div className="font-tight text-sm font-medium">Update available</div>
                 <p className="mt-0.5 text-xs text-[var(--muted)]">
-                  {edition.productName} {state.version} is ready to install.
+                  {app.productName} {state.version} is ready to install.
                 </p>
               </div>
               <button
@@ -40,9 +47,29 @@ export function UpdateBanner({
                 <X className="h-4 w-4" />
               </button>
             </div>
+            {state.notes && <Notes text={state.notes} />}
             <Button variant="primary" size="md" icon={Download} onClick={onInstall} className="mt-3 w-full">
               Update and restart
             </Button>
+          </>
+        )}
+
+        {state.status === "updated" && (
+          <>
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Sparkles className="h-4 w-4 text-[var(--muted)]" />
+                <div className="font-tight text-sm font-medium">What's new in {state.version}</div>
+              </div>
+              <button
+                onClick={onDismiss}
+                className="shrink-0 text-[var(--faint)] hover:text-[var(--fg)]"
+                title="Close"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <Notes text={state.notes} />
           </>
         )}
 
@@ -68,6 +95,14 @@ export function UpdateBanner({
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function Notes({ text }: { text: string }) {
+  return (
+    <div className="mt-2 max-h-40 overflow-y-auto whitespace-pre-wrap text-xs leading-relaxed text-[var(--fg)]">
+      {text.trim()}
     </div>
   );
 }

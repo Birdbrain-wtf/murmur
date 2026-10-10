@@ -1,6 +1,6 @@
 [package]
 name = "murmur"
-version = "0.4.3"
+version = "0.4.4"
 description = "Murmur and its editions: a plugin host over Matrix, Seeds and the group's memory"
 authors = ["Birdbrain"]
 edition = "2021"
