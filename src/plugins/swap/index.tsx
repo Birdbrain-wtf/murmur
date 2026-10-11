@@ -811,9 +811,12 @@ function AccountSection({
           ? { ok: true, text: `${r.pas} PAS and ${r.dusd} dUSD are on their way. They show here when the block is final.` }
           : { ok: false, text: r.error || "The drip didn't answer. Try again in a minute." },
       );
-      if (r.ok) setTimeout(onRefresh, 15_000);
+      if (r.ok) setTimeout(onRefresh, r.pending ? 40_000 : 15_000);
     } catch {
-      setDrip({ ok: false, text: "The drip didn't answer. Try again in a minute." });
+      // No answer can still mean it went out (a slow network outlasts the
+      // edge), so look again before saying try again.
+      setDrip({ ok: false, text: "No answer yet. It may still arrive, so this checks again in a minute." });
+      setTimeout(onRefresh, 60_000);
     }
   };
 

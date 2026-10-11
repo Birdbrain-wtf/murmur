@@ -88,3 +88,4 @@ writeFileSync(join(dir, "index.tsx"), tpl);
 console.log(`✓ created src/plugins/${id}/index.tsx  (export: ${exportName})`);
 console.log("  auto-discovered by the registry — run `bun run dev` to see it.");
 console.log("  next: set order/backend, build the Panel, then `bun run build` to type-check.");
+console.log("  then offer it: add the id to an edition's `custom` (made for that collective) or `plugins` (market) in src/edition.ts.");

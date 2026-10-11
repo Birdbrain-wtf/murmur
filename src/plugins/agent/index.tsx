@@ -9,7 +9,7 @@ import {
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
-import { edition, groupWord } from "../../edition";
+import { edition, groupWord, installs } from "../../edition";
 import { Button, Notice, Page, PageHeader, Waiting } from "../../ui";
 import { getModule } from "../../host/registry";
 import { listSecrets } from "../../lib/secrets";
@@ -110,7 +110,7 @@ function useSetup(identity: PluginContext["identity"]): Step[] {
     };
   }, []);
 
-  const has = (id: string) => edition.plugins.includes(id);
+  const has = (id: string) => installs(edition).includes(id);
   const signedIn = !!(identity.signedIn && identity.session);
   const steps: Step[] = [
     {
@@ -178,7 +178,7 @@ function report(steps: Step[], installed: string[]) {
   const done = (id: string) => steps.find((s) => s.id === id)?.done;
   return {
     checkIns: checkInsSupported ? (done("checkins") ? "on" : "off") : "unsupported",
-    ...(edition.plugins.includes("chat") ? { chat: !!done("chat") } : {}),
+    ...(installs(edition).includes("chat") ? { chat: !!done("chat") } : {}),
     keys: listSecrets().length,
     ...(edition.ops ? { ops: done("ops") ? "paired" : "unpaired" } : {}),
     installed,
@@ -267,7 +267,7 @@ function Panel({ identity, open }: PluginContext) {
     localStorage.setItem(FOLD_KEY, folded ? "1" : "0");
   }, [folded]);
 
-  const installed = useMemo(() => edition.plugins.filter((id) => !!getModule(id)), []);
+  const installed = useMemo(() => installs(edition).filter((id) => !!getModule(id)), []);
 
   async function send(raw: string) {
     const q = raw.trim();

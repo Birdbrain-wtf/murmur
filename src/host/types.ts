@@ -42,6 +42,11 @@ interface ModuleBase {
    * Suggest panel say so. Drop the flag when the plugin is ready for real use.
    */
   lab?: boolean;
+  /**
+   * The collective that made it, shown on market plugins. Unset means Decent.
+   * (Which tier a plugin sits in is per edition: `tierOf` in `../edition.ts`.)
+   */
+  by?: string;
 }
 
 /**

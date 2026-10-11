@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { DEFAULT_INSTALLED } from "./registry";
+import { DEFAULT_INSTALLED, isStandard } from "./registry";
+import { STANDARD } from "../edition";
 
 // Bumped to v2 with the first public release's curated plugin set, so existing
 // clients pick up the new defaults rather than a stale install list.
@@ -32,7 +33,9 @@ function load(): string[] {
   }
   const fresh = DEFAULT_INSTALLED.filter((id) => !seen.includes(id) && !list!.includes(id));
   localStorage.setItem(SEEN, JSON.stringify([...new Set([...seen, ...DEFAULT_INSTALLED])]));
-  return [...list, ...fresh];
+  // The standard tier comes back even on an install that removed it before it was standard.
+  const missing = STANDARD.filter((id) => !list!.includes(id) && !fresh.includes(id));
+  return [...list, ...fresh, ...missing];
 }
 
 /**
@@ -52,6 +55,7 @@ export function useInstalled() {
   }, []);
 
   const uninstall = useCallback((id: string) => {
+    if (isStandard(id)) return;
     setInstalled((prev) => prev.filter((x) => x !== id));
   }, []);
 

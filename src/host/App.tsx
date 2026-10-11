@@ -6,6 +6,7 @@ import {
   pluginCatalog,
   instance,
   getModule,
+  isStandard,
 } from "./registry";
 import { useInstalled } from "./useInstalled";
 import { useIdentity } from "../identity/useIdentity";
@@ -14,7 +15,7 @@ import { useUpdater } from "./useUpdater";
 import { UpdateBanner } from "./UpdateBanner";
 import { PluginFeedback } from "./PluginFeedback";
 import { CollectiveSwitcher } from "./Collectives";
-import { edition } from "../edition";
+import { edition, TIERS, tierOf } from "../edition";
 import { Button, Status } from "../ui";
 
 const UPGRADE_DOT = "#af52de";
@@ -220,50 +221,98 @@ function Catalog({
           </button>
         </div>
 
-        <div className="flex flex-col gap-2 p-4">
-          {pluginCatalog.map((p) => {
-            const on = isInstalled(p.id);
-            const Icon = p.icon;
+        <div className="flex flex-col gap-5 p-4">
+          {TIERS.map((t) => {
+            const list = pluginCatalog.filter((p) => tierOf(edition, p.id) === t.id);
             return (
-              <article
-                key={p.id}
-                className="flex items-center gap-4 rounded-[var(--radius)] border border-[var(--line)] px-4 py-3"
-              >
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius)] border border-[var(--line-strong)]">
-                  <Icon className="h-5 w-5 text-[var(--muted)]" />
+              <section key={t.id} className="flex flex-col gap-2">
+                <div className="flex items-baseline gap-2 px-1">
+                  <span className="font-tight text-sm font-medium">{t.title}</span>
+                  <span className="text-xs text-[var(--faint)]">
+                    {t.id === "custom" ? `Made for ${edition.instance.name}` : t.line}
+                  </span>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="font-tight text-sm font-medium">
-                      {p.title}
-                    </span>
-                    {p.lab && <Status>lab</Status>}
-                    {p.needsUpgrade && <Status tone="warn">needs the larger app</Status>}
-                  </div>
-                  <div className="mt-0.5 truncate text-xs text-[var(--muted)]">
-                    {p.tagline}
-                  </div>
-                </div>
-                {on ? (
-                  <div className="flex items-center gap-1">
-                    <Button variant="quiet" onClick={() => uninstall(p.id)} title={`Remove ${p.title}`}>
-                      Remove
-                    </Button>
-                    <Button onClick={() => onOpen(p.id)} trailing={ArrowUpRight}>
-                      Open
-                    </Button>
-                  </div>
-                ) : (
-                  <Button variant="primary" icon={Plus} onClick={() => install(p.id)}>
-                    Add
-                  </Button>
+                {list.length === 0 && (
+                  <p className="px-1 text-xs text-[var(--faint)]">
+                    {t.id === "custom"
+                      ? `Nothing made for ${edition.instance.name} yet. A plugin for your own process or rituals goes here.`
+                      : t.id === "market"
+                        ? "Nothing from other collectives yet. Plugins they make and share will show here."
+                        : "None."}
+                  </p>
                 )}
-              </article>
+                {list.map((p) => (
+                  <CatalogRow
+                    key={p.id}
+                    p={p}
+                    on={isInstalled(p.id)}
+                    fixed={isStandard(p.id)}
+                    market={t.id === "market"}
+                    install={install}
+                    uninstall={uninstall}
+                    onOpen={onOpen}
+                  />
+                ))}
+              </section>
             );
           })}
         </div>
 
       </div>
     </div>
+  );
+}
+
+function CatalogRow({
+  p,
+  on,
+  fixed,
+  market,
+  install,
+  uninstall,
+  onOpen,
+}: {
+  p: MurmurModule;
+  on: boolean;
+  fixed: boolean;
+  market: boolean;
+  install: (id: string) => void;
+  uninstall: (id: string) => void;
+  onOpen: (id: string) => void;
+}) {
+  const Icon = p.icon;
+  return (
+    <article className="flex items-center gap-4 rounded-[var(--radius)] border border-[var(--line)] px-4 py-3">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius)] border border-[var(--line-strong)]">
+        <Icon className="h-5 w-5 text-[var(--muted)]" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2">
+          <span className="font-tight text-sm font-medium">{p.title}</span>
+          {p.lab && <Status>lab</Status>}
+          {p.needsUpgrade && <Status tone="warn">needs the larger app</Status>}
+        </div>
+        <div className="mt-0.5 truncate text-xs text-[var(--muted)]">
+          {market ? `By ${p.by ?? "Decent"} · free · ` : ""}
+          {p.tagline}
+        </div>
+      </div>
+      {on ? (
+        <div className="flex items-center gap-1">
+          {!fixed && (
+            <Button variant="quiet" onClick={() => uninstall(p.id)} title={`Remove ${p.title}`}>
+              Remove
+            </Button>
+          )}
+          <Button onClick={() => onOpen(p.id)} trailing={ArrowUpRight}>
+            Open
+          </Button>
+        </div>
+      ) : (
+        <Button variant="primary" icon={Plus} onClick={() => install(p.id)}>
+          Add
+        </Button>
+      )}
+    </article>
   );
 }

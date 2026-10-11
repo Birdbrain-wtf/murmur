@@ -20,6 +20,30 @@ import { enterScope, joinedCollectives, storedCollective } from "./host/scope";
 
 export type EditionId = string;
 
+/**
+ * Every plugin an edition carries sits in one of four tiers (the catalog groups
+ * them this way, and so does the Incubation page on the operations console):
+ *
+ * - **standard**: in every edition and never removable. The collective's own
+ *   agent, beside the core surfaces (notes, settings, profile).
+ * - **starter**: the suggested set a new edition begins with. Installed on a
+ *   fresh client, removable, and an edition may leave any of them out.
+ * - **custom**: made for one collective, to carry its own process or rituals
+ *   (FTTF's Watch, Tetherdown's Fundraise). Offered in that edition only. A
+ *   custom plugin another collective asks for moves to the market.
+ * - **market**: made by a collective, Decent included, and offered to others.
+ *   Free today; a price waits on the payments plugin.
+ */
+export type Tier = "standard" | "starter" | "custom" | "market";
+export const STANDARD = ["agent"];
+export const STARTER = ["magazine", "chat", "meet"];
+export const TIERS: { id: Tier; title: string; line: string }[] = [
+  { id: "standard", title: "Standard", line: "Always here" },
+  { id: "starter", title: "Starter", line: "Suggested to begin with" },
+  { id: "custom", title: "Custom", line: "Made for this collective" },
+  { id: "market", title: "Market", line: "Made by a collective, offered to others" },
+];
+
 export interface Edition {
   id: EditionId;
   /** what the window, the dock and the update banner call the app */
@@ -38,9 +62,12 @@ export interface Edition {
   vaultSync: boolean;
   /** what notes say they write into */
   vaultName: string;
-  /** the plugins this edition offers, which are also what a fresh install has.
-   *  `agent` is in every edition: the collective's own agent, named after it */
+  /** the starter and market plugins a fresh install has (the standard tier,
+   *  `agent`, is added to every edition and is not listed here) */
   plugins: string[];
+  /** plugins made for this collective's own process; installed fresh, offered
+   *  in no other edition */
+  custom?: string[];
   /** plugins offered in the catalog but not installed on a fresh client; a
    *  member adds them from Plugins. Used for surfaces still on test money */
   optional?: string[];
@@ -59,6 +86,8 @@ export interface Edition {
   /** the other collectives a member of this app can add beside its own, each
    *  opening in its own space with its own skin, plugins and sign-in */
   joinable?: EditionId[];
+  /** the shared record (cc/<record>) the Fundraise plugin reads its campaigns from */
+  fundraising?: { record: string };
 }
 
 const EDITIONS: Record<EditionId, Edition> = {
@@ -71,7 +100,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     selfUpdate: true,
     vaultSync: false,
     vaultName: "this device",
-    plugins: ["agent", "meet", "chat", "pay", "magazine"],
+    plugins: [...STARTER, "pay"],
     optional: ["swap", "exchange"],
     exchangeMarket: "dex.birdbrain.wtf:7232",
     home: "agent",
@@ -92,7 +121,10 @@ const EDITIONS: Record<EditionId, Edition> = {
     selfUpdate: true,
     vaultSync: true,
     vaultName: "the Decent vault",
-    plugins: ["agent", "meet", "chat", "pay", "magazine", "operations", "files", "invite"],
+    // Decent Magazine and Chaos Sessions are Decent's own rituals, so in its own
+    // edition they are custom. Other editions get them as the starter set.
+    custom: ["magazine", "meet"],
+    plugins: ["chat", "pay", "operations", "files", "invite"],
     optional: ["swap"],
     home: "agent",
     ops: { base: "https://www.decent.partners" },
@@ -107,6 +139,29 @@ const EDITIONS: Record<EditionId, Edition> = {
     },
   },
 };
+
+/** Every profile in this build, for tools outside the app that list the
+ *  editions (the Incubation page on the operations console). The app reads `app`
+ *  and `edition`, never this. */
+export const profiles: Readonly<Record<EditionId, Edition>> = EDITIONS;
+
+/** What a fresh install of an edition has: standard, then custom, then the rest. */
+export function installs(e: Edition): string[] {
+  return [...new Set([...STANDARD, ...(e.custom ?? []), ...e.plugins])];
+}
+
+/** Everything an edition offers in its catalog, installed or not. */
+export function offers(e: Edition): string[] {
+  return [...new Set([...installs(e), ...(e.optional ?? [])])];
+}
+
+/** Which tier a plugin sits in, for this edition. */
+export function tierOf(e: Edition, id: string): Tier {
+  if (STANDARD.includes(id)) return "standard";
+  if (e.custom?.includes(id)) return "custom";
+  if (STARTER.includes(id)) return "starter";
+  return "market";
+}
 
 /** The build: its name in the dock, its signing key, its update channel. It
  *  never changes while the app runs. */

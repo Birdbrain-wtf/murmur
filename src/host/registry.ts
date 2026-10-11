@@ -2,7 +2,7 @@ import type { MurmurModule, InstanceConfig } from "./types";
 import { identitySurface } from "../identity";
 import { notesSurface } from "../notes";
 import { settingsSurface } from "../settings";
-import { app, edition } from "../edition";
+import { app, edition, installs, offers, STANDARD } from "../edition";
 
 /**
  * The instance this client is bound to. Each edition ships pointed at one
@@ -62,12 +62,11 @@ function isPlugin(x: unknown): x is MurmurModule {
  * surfaced in the catalog and rail — the rest stay in the codebase, hidden,
  * and are added back by appending their id as their backends mature.
  *
- * Set per edition (`../edition.ts`). Murmur and Decent: chat, meet, pay,
- * magazine. FTTF: watch, chat.
+ * Set per edition (`../edition.ts`): the standard tier, the edition's custom
+ * plugins, its starter and market picks, and its optional ones.
  */
 export const RELEASE_PLUGINS = [
-  ...edition.plugins,
-  ...(edition.optional ?? []),
+  ...offers(edition),
   // Plugins held back from every edition can be surfaced in a local build to try
   // them: VITE_EXTRA_PLUGINS=exchange bun run dev
   ...String(import.meta.env.VITE_EXTRA_PLUGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
@@ -82,7 +81,10 @@ export const pluginCatalog: MurmurModule[] = Object.values(discovered)
 /** Plugins installed on a fresh client — the full v1 surface. Notes (core) is
  *  always mounted alongside these. Collaborate lives inside Notes. Anything
  *  held back from `RELEASE_PLUGINS` cannot be installed until it's released. */
-export const DEFAULT_INSTALLED = edition.plugins;
+export const DEFAULT_INSTALLED = installs(edition);
+
+/** The standard tier: always installed, never removable. */
+export const isStandard = (id: string) => STANDARD.includes(id);
 
 const all = [...coreModules, ...pluginCatalog];
 
