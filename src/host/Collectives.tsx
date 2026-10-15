@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { Check, Plus, Users, X } from "lucide-react";
-import { app, collectives, edition, memberOf, type Edition } from "../edition";
+import { app, collectives, edition, memberOf, shaped, type Edition } from "../edition";
 import { joinCollective, leaveCollective, peek, switchCollective } from "./scope";
-import { BRAND_PRESETS } from "./useSkin";
+import { BRAND_PRESETS, logoUrl } from "./useSkin";
 import { Button, List, Row, Section, Status } from "../ui";
+import { GROUPS, GroupList, GroupMark, hereKey, openGroup } from "../demo/groups";
 
 /**
  * The collectives this member keeps in one app (`./scope.ts`). Each opens in
@@ -14,7 +15,7 @@ import { Button, List, Row, Section, Status } from "../ui";
 
 function logoOf(c: Edition): string {
   const preset = BRAND_PRESETS.find((p) => p.id === (c.defaultSkin || c.instance.slug));
-  return preset?.skin.logo ?? "";
+  return preset?.skin.logo ? logoUrl(preset.skin.logo) : "";
 }
 
 function signedInAs(c: Edition): string | null {
@@ -118,18 +119,34 @@ export function CollectivesSection() {
 /** The mark at the top of the rail, which opens the switcher. */
 export function CollectiveSwitcher({ name, logo: skinLogo }: { name: string; logo: string }) {
   const [open, setOpen] = useState(false);
-  const logo = skinLogo || logoOf(edition);
-  const many = collectives.length > 1;
+  const logo = shaped && shaped.source !== "pack" ? "" : skinLogo || logoOf(edition);
+  // The invented demo's sample member belongs to several groups (`demo/groups.tsx`).
+  const sample = GROUPS.length > 0;
+  const many = collectives.length > 1 || sample;
   return (
-    <>
+    <div data-tour="groups" className="contents md:flex md:shrink-0 md:flex-col md:items-center">
       <button
         onClick={() => many && setOpen(true)}
         title={many ? `${name}: switch collective` : name}
-        className="prism-hover hidden h-10 w-10 items-center justify-center overflow-hidden rounded-[var(--radius)] border border-[var(--line-strong)] font-tight text-base font-semibold md:flex"
+        className="prism-hover hidden h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-[var(--radius)] border border-[var(--line-strong)] font-tight text-base font-semibold md:flex"
       >
         {logo ? <img src={logo} alt={name} className="h-full w-full object-cover" /> : name.slice(0, 1)}
       </button>
-      {memberOf.length > 1 && (
+      {sample && (
+        <div className="hidden flex-col items-center gap-1.5 md:mt-2 md:flex">
+          {GROUPS.filter((g) => g.key !== hereKey).map((g) => (
+            <button
+              key={g.key}
+              onClick={() => openGroup(g)}
+              title={`Open ${g.name}, where Alice is ${g.role}`}
+              className="prism-hover opacity-60 transition hover:opacity-100"
+            >
+              {g.archetype ? <GroupMark name={g.name} size="sm" /> : <Mark c={app} size="sm" />}
+            </button>
+          ))}
+        </div>
+      )}
+      {!sample && memberOf.length > 1 && (
         <div className="hidden flex-col items-center gap-1.5 md:mt-2 md:flex">
           {memberOf
             .filter((c) => c.id !== edition.id)
@@ -153,19 +170,23 @@ export function CollectiveSwitcher({ name, logo: skinLogo }: { name: string; log
           >
             <div className="flex items-center justify-between border-b border-[var(--line)] px-6 py-4">
               <div>
-                <div className="font-tight text-lg font-medium">Collectives</div>
-                <p className="text-xs text-[var(--muted)]">Each keeps its own look, plugins and sign-in.</p>
+                <div className="font-tight text-lg font-medium">{sample ? "Alice's groups" : "Collectives"}</div>
+                <p className="text-xs text-[var(--muted)]">
+                  {sample
+                    ? "One identity in every group. Each has its own plugins and rules, and her notes and record go with her."
+                    : "Each keeps its own look, plugins and sign-in."}
+                </p>
               </div>
               <button onClick={() => setOpen(false)} className="text-[var(--faint)] hover:text-[var(--fg)]">
                 <X className="h-5 w-5" />
               </button>
             </div>
             <div className="p-4">
-              <CollectiveList />
+              {sample ? <GroupList /> : <CollectiveList />}
             </div>
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

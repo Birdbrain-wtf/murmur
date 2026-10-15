@@ -4,7 +4,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./host/App";
 import { IdentityProvider } from "./identity/useIdentity";
-import { BRAND_PRESETS, SkinProvider } from "./host/useSkin";
+import { BRAND_PRESETS, logoUrl, SkinProvider } from "./host/useSkin";
 import "./styles.css";
 
 document.title = app.productName;
@@ -14,7 +14,7 @@ const mark = BRAND_PRESETS.find((p) => p.id === app.defaultSkin)?.skin.logo;
 if (mark) {
   const icon = document.createElement("link");
   icon.rel = "icon";
-  icon.href = mark;
+  icon.href = logoUrl(mark);
   document.head.appendChild(icon);
 }
 

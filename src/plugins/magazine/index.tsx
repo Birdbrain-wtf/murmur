@@ -4,6 +4,8 @@ import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
 import { openInBrowser } from "../../identity/passkey";
 import { Button, Page, PageHeader, Waiting } from "../../ui";
+import { samplePublication } from "../../demo/sample";
+import { PublicationPanel } from "../../demo/publication";
 
 /**
  * Magazine plugin: read Decent Magazine, the live issue.
@@ -84,14 +86,17 @@ function Panel(_: PluginContext) {
   );
 }
 
+// An invented demo organisation has a publication of its own, never Decent's.
+const own = samplePublication;
+
 export const magazinePlugin: MurmurPlugin = {
   id: "magazine",
-  title: "Magazine",
-  tagline: "Read the live issue of Decent Magazine",
+  title: own ? own.name : "Magazine",
+  tagline: own ? "Your own publication, where ideas are argued first" : "Read the live issue of Decent Magazine",
   icon: Newspaper,
   order: 40,
   kind: "plugin",
   support: issues("magazine"),
-  backend: "Decent Magazine (live broadsheet)",
-  Panel,
+  backend: own ? "the organisation's own record" : "Decent Magazine (live broadsheet)",
+  Panel: own ? PublicationPanel : Panel,
 };

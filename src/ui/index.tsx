@@ -35,14 +35,25 @@ export function PageHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="shrink-0 border-b border-[var(--line)] px-8 pt-7 pb-5">
-      <div className="flex items-start justify-between gap-6">
+    <header className="relative shrink-0 border-b border-[var(--line)] bg-[var(--ink-wash,transparent)] px-8 pt-7 pb-5">
+      {/* In the demo each surface wears its own ink (demo/ink.ts): a band, a chip and a wash. */}
+      <span aria-hidden className="absolute inset-x-0 top-0 h-1 bg-[var(--ink,transparent)]" />
+      {/* On phones the actions drop under the title and wrap, so a header with
+          several buttons never pushes the page sideways. */}
+      <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-6">
         <div className="min-w-0">
-          <Eyebrow icon={Icon}>{eyebrow}</Eyebrow>
-          <h1 className="font-tight mt-2 text-2xl font-medium tracking-[-0.01em]">{title}</h1>
+          <div className="[.inked_&_svg]:hidden">
+            <Eyebrow icon={Icon}>{eyebrow}</Eyebrow>
+          </div>
+          <h1 className="font-tight mt-2 flex items-center gap-3 text-2xl font-medium tracking-[-0.01em]">
+            <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[var(--ink)] text-[var(--ink-on)] [.inked_&]:flex">
+              <Icon className="h-[18px] w-[18px]" />
+            </span>
+            <span className="min-w-0">{title}</span>
+          </h1>
           {lede && <p className="mt-1.5 max-w-xl text-sm leading-relaxed text-[var(--muted)]">{lede}</p>}
         </div>
-        {actions && <div className="flex shrink-0 items-center gap-2 pt-5">{actions}</div>}
+        {actions && <div className="flex flex-wrap items-center gap-2 md:shrink-0 md:pt-5">{actions}</div>}
       </div>
       {children}
     </header>
@@ -72,7 +83,7 @@ export function PageBody({
 export function Eyebrow({ icon: Icon, children }: { icon?: LucideIcon; children: ReactNode }) {
   return (
     <div className="font-mono flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-[var(--faint)]">
-      {Icon && <Icon className="h-3.5 w-3.5" />}
+      {Icon && <Icon className="h-3.5 w-3.5 text-[var(--ink,currentColor)]" />}
       {children}
     </div>
   );
@@ -146,7 +157,7 @@ export function Row({
   return (
     <div className="flex items-start justify-between gap-4">
       <div className="flex min-w-0 items-start gap-3">
-        {Icon && <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--muted)]" />}
+        {Icon && <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ink,var(--muted))]" />}
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="font-tight text-sm font-medium">{title}</span>
@@ -175,7 +186,7 @@ const TONE: Record<Tone, string> = {
   warn: "var(--warn)",
   danger: "var(--danger)",
   idle: "var(--faint)",
-  live: "var(--accent)",
+  live: "var(--ink, var(--accent))",
 };
 
 export function Dot({ tone = "idle", pulse }: { tone?: Tone; pulse?: boolean }) {

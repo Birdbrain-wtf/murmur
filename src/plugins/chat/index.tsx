@@ -28,6 +28,7 @@ import {
 } from "../../ui";
 import { participate, today } from "../../identity/participation";
 import { CallStage, joinCall, leaveCall, useCallers, type CallState } from "./call";
+import { DemoChat } from "./demo";
 
 /**
  * Chat plugin — Matrix.
@@ -71,7 +72,13 @@ interface EventLite {
 
 const SESSION_KEY = "murmur.matrix.session.v1";
 
-function Panel({ identity, open }: PluginContext) {
+/** A demo edition shows sample rooms until the member signs in (`./demo.tsx`). */
+function Panel(ctx: PluginContext) {
+  if (edition.demo && !(ctx.identity.signedIn && ctx.identity.session)) return <DemoChat {...ctx} />;
+  return <LivePanel {...ctx} />;
+}
+
+function LivePanel({ identity, open }: PluginContext) {
   const [client, setClient] = useState<any>(null);
   const [phase, setPhase] = useState<"loggedout" | "connecting" | "ready">(
     "loggedout",

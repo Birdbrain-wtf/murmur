@@ -25,10 +25,15 @@ import type { Net } from "./hub";
 export type { Net };
 export type Side = "native" | "dusd";
 
+/** lab/swap/bbt.json, the test BBT on Paseo Asset Hub. */
+const BBT_TEST_ID = 50001041;
+
 export interface Token {
   symbol: string;
   decimals: number;
 }
+
+export type Asset = Token & { assetId: number };
 
 export interface Network {
   id: Net;
@@ -37,6 +42,8 @@ export interface Network {
   ss58: number;
   native: Token;
   dusd: Token & { assetId: number };
+  /** every asset with a pool against the native token that Swap offers, dUSD first */
+  assets: Asset[];
   /** a finished swap, for the member to check somewhere other than this app */
   explorer: (block: string, index: number) => string;
 }
@@ -49,6 +56,12 @@ export const NETWORKS: Record<Net, Network> = {
     native: { symbol: "PAS", decimals: 10 },
     // A test dUSD in a PAS/dUSD pool priced like KSM/dUSD at par (lab/swap/setup-testnet.ts).
     dusd: { symbol: "dUSD", decimals: 6, assetId: 50001039 },
+    assets: [
+      { symbol: "dUSD", decimals: 6, assetId: 50001039 },
+      // The BBT test: fixed supply, LP tokens and every admin role sent to a keyless
+      // account, so nobody can mint, freeze or pull the pool (lab/swap/setup-bbt.ts).
+      { symbol: "BBT", decimals: 10, assetId: BBT_TEST_ID },
+    ],
     explorer: (b, i) => `https://assethub-paseo.subscan.io/extrinsic/${b}-${i}`,
   },
   kusama: {
@@ -57,9 +70,18 @@ export const NETWORKS: Record<Net, Network> = {
     ss58: 2,
     native: { symbol: "KSM", decimals: 12 },
     dusd: { symbol: "dUSD", decimals: 6, assetId: 50000002 },
+    assets: [{ symbol: "dUSD", decimals: 6, assetId: 50000002 }],
     explorer: (b, i) => `https://assethub-kusama.subscan.io/extrinsic/${b}-${i}`,
   },
 };
+
+/**
+ * The same network with `asset` standing where dUSD stands. Every function here
+ * reads `n.dusd` as "the asset on the other side of the pool", so a swap, quote,
+ * balance or fee for BBT is the dUSD call made on `withAsset(n, bbt)`.
+ */
+export const withAsset = (n: Network, asset: Asset): Network => (asset.assetId === n.dusd.assetId ? n : { ...n, dusd: asset });
+export const assetById = (n: Network, id: number | undefined) => n.assets.find((a) => a.assetId === id) ?? n.dusd;
 
 /**
  * Real KSM can be quoted but not swapped yet. Turning this on is rich's call:
@@ -147,20 +169,25 @@ export interface Balances {
   /** native that can leave the account without closing it */
   native: bigint;
   dusd: bigint;
+  /** every asset in `n.assets`, by asset id */
+  assets: Record<number, bigint>;
 }
 
 export async function balances(client: PolkadotClient, n: Network, address: string): Promise<Balances> {
   const api = client.getUnsafeApi() as any;
-  const [acc, asset, ed] = await Promise.all([
+  const ids = [...new Set([n.dusd.assetId, ...n.assets.map((a) => a.assetId)])];
+  const [acc, ed, ...held] = await Promise.all([
     api.query.System.Account.getValue(address),
-    api.query.Assets.Account.getValue(n.dusd.assetId, address),
     api.constants.Balances.ExistentialDeposit(),
+    ...ids.map((id) => api.query.Assets.Account.getValue(id, address)),
   ]);
   const { free, frozen } = acc.data as { free: bigint; frozen: bigint };
   const locked = frozen > ed ? frozen : ed;
+  const assets = Object.fromEntries(ids.map((id, i) => [id, (held[i]?.balance as bigint) ?? 0n]));
   return {
     native: free > locked ? free - locked : 0n,
-    dusd: asset?.balance ?? 0n,
+    dusd: assets[n.dusd.assetId],
+    assets,
   };
 }
 
@@ -211,7 +238,7 @@ export async function quote(client: PolkadotClient, n: Network, from: Side, amou
   };
 }
 
-function swapTx(client: PolkadotClient, n: Network, q: Quote, sendTo: string) {
+export function swapTx(client: PolkadotClient, n: Network, q: Quote, sendTo: string) {
   const api = client.getUnsafeApi() as any;
   return api.tx.AssetConversion.swap_exact_tokens_for_tokens({
     path: [location(n, q.from), location(n, other(q.from))],
@@ -322,7 +349,7 @@ export async function recipient(client: PolkadotClient, n: Network, to: string) 
   return { open: (acc.providers as number) > 0, minimum: ed as bigint };
 }
 
-function sendTx(client: PolkadotClient, n: Network, side: Side, to: string, amount: bigint) {
+export function sendTx(client: PolkadotClient, n: Network, side: Side, to: string, amount: bigint) {
   const api = client.getUnsafeApi() as any;
   const dest = { type: "Id", value: to };
   // keep_alive both ways: a send never closes the account it leaves
@@ -380,6 +407,8 @@ export interface Done {
   index: number;
   /** a send's destination */
   to?: string;
+  /** the asset on the other side, when it was not dUSD */
+  asset?: number;
 }
 
 const HISTORY = "murmur.swap.history.v1";

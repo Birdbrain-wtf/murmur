@@ -1,3 +1,4 @@
+import { Horizon } from "../../demo/brief";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowUpRight,
@@ -9,12 +10,13 @@ import {
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
-import { edition, groupWord, installs } from "../../edition";
+import { edition, groupWord, installs, shaped } from "../../edition";
 import { Button, Notice, Page, PageHeader, Waiting } from "../../ui";
 import { getModule } from "../../host/registry";
 import { listSecrets } from "../../lib/secrets";
 import { useOps } from "../../lib/ops";
 import { supported as checkInsSupported, useParticipation } from "../../identity/participation";
+import { sampleAnswers, sampleFallback } from "../../demo/sample";
 
 /**
  * The collective's own agent, inside the app. Named after the edition (Decent,
@@ -145,7 +147,7 @@ function useSetup(identity: PluginContext["identity"]): Step[] {
   steps.push({
     id: "keys",
     title: "Add your keys",
-    hint: "API keys stay in this computer's secure store.",
+    hint: "Kept in this computer's secure store.",
     done: listSecrets().length > 0,
     place: "settings",
     ask: "How do I add an API key, and what are keys for?",
@@ -253,6 +255,12 @@ function Panel({ identity, open }: PluginContext) {
 
   const name = edition.instance.name;
   const signedIn = !!(identity.signedIn && identity.session);
+  // A demo edition, before logins: the agent answers from a short script
+  // (demo/sample.ts) so a newcomer can see what it is for.
+  const scripted = !!edition.demo && !signedIn;
+  // Huxley's own story (not a visitor's sketch): the agent opens on a read of everything.
+  const story = !!edition.showcase && !shaped;
+  const canAsk = signedIn || scripted;
   const doneCount = steps.filter((s) => s.done).length;
   const allDone = doneCount === steps.length;
   const next = steps.find((s) => !s.done);
@@ -271,7 +279,18 @@ function Panel({ identity, open }: PluginContext) {
 
   async function send(raw: string) {
     const q = raw.trim();
-    if (!q || busy || !identity.session) return;
+    if (!q || busy) return;
+    if (scripted) {
+      setDraft("");
+      const hit = sampleAnswers.find((x) => x.match(q)) ?? sampleFallback;
+      setBusy({ q, text: "", waited: 0 });
+      setTimeout(() => {
+        setBusy(null);
+        setThread((t) => [...t, { q, a: hit.a, actions: hit.places, at: Date.now() }]);
+      }, 700);
+      return;
+    }
+    if (!identity.session) return;
     if (SECRETISH.test(q)) {
       setDraft("");
       setThread((t) => [
@@ -280,7 +299,7 @@ function Panel({ identity, open }: PluginContext) {
           q: "(not sent)",
           a: "",
           actions: ["settings"],
-          error: "That looks like a key, so I haven't sent it. Keys never belong in a conversation: save it in Settings, under Secrets and API keys, where it goes into this computer's secure store.",
+          error: "That looks like a key, so I didn't send it. Save keys in Settings, where they go into this computer's secure store.",
           at: Date.now(),
         },
       ]);
@@ -326,9 +345,11 @@ function Panel({ identity, open }: PluginContext) {
     if (next) out.push(doneCount === 0 ? "I'm new here. Where do I start?" : `What's next after ${steps[0].done ? "signing in" : "this"}?`);
     out.push(`What can the ${edition.productName} app do?`);
     for (const s of steps) if (!s.done && out.length < 4) out.push(s.ask);
+    // In a demo, the questions its script was written for come first.
+    if (scripted) out.splice(1, 0, ...sampleAnswers.flatMap((x) => (x.ask ? [x.ask] : [])).slice(0, 3));
     if (out.length < 4) out.push(`What is ${name}?`);
-    return [...new Set(out)].slice(0, 4);
-  }, [steps, next, doneCount, name]);
+    return [...new Set(out)].slice(0, scripted ? 5 : 4);
+  }, [steps, next, doneCount, name, scripted]);
 
   return (
     <Page>
@@ -336,7 +357,11 @@ function Panel({ identity, open }: PluginContext) {
         icon={Sparkles}
         eyebrow={edition.productName.toLowerCase()}
         title={`Talk to ${name}`}
-        lede={`Ask how anything here works. ${name} will help you get set up and get work done.`}
+        lede={
+          story
+            ? `The read on everything in ${name}, and help with the rest.`
+            : `Ask how anything works. ${name} helps you get set up and get work done.`
+        }
         actions={
           thread.length > 0 && !busy ? (
             <Button icon={RotateCcw} onClick={() => setThread([])} title="Start a new conversation">
@@ -347,8 +372,18 @@ function Panel({ identity, open }: PluginContext) {
       />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
+        {/* every showcase demo: how you'll use it, from a screen per thing to the read to a conversation */}
+        {edition.showcase && (
+          <Horizon
+            installed={installed}
+            open={open}
+            start={story ? "next" : "today"}
+            say={(q, a, places) => setThread((t) => [...t, { q, a, actions: places, at: Date.now() }])}
+          />
+        )}
+
         {/* setup: worked out from the app itself, so it holds when the model is slow */}
-        <section className="mb-6 overflow-hidden rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)]">
+        {!story && <section className="mb-6 overflow-hidden rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)]">
           <button
             onClick={() => setFolded((f) => !f)}
             className="flex w-full items-center gap-3 px-5 py-3.5 text-left"
@@ -379,7 +414,7 @@ function Panel({ identity, open }: PluginContext) {
                   </div>
                   {!s.done && (
                     <>
-                      {signedIn && (
+                      {canAsk && (
                         <Button variant="quiet" onClick={() => void send(s.ask)} disabled={!!busy}>
                           Ask
                         </Button>
@@ -391,14 +426,18 @@ function Panel({ identity, open }: PluginContext) {
               ))}
             </ol>
           )}
-        </section>
+        </section>}
 
         {/* the conversation */}
         {thread.length === 0 && !busy && (
           <div className="font-serif max-w-prose text-[15px] leading-relaxed text-[var(--muted)]">
-            {signedIn
-              ? `Hello${identity.handle ? ` ${identity.handle}` : ""}. I'm ${name}. Ask me anything about the app or about ${name}, or start with one of these.`
-              : `I'm ${name}. Sign in with your passkey first, so I know who I'm talking to. The list above shows the way.`}
+            {story
+              ? `Or ask me anything. In this demo I answer from a script.`
+              : scripted
+              ? `I'm ${name}. In this demo I answer from a script. Try one of these.`
+              : signedIn
+              ? `Hello${identity.handle ? ` ${identity.handle}` : ""}. I'm ${name}. Ask me anything, or start with one of these.`
+              : `I'm ${name}. Sign in with your passkey first, using the list above.`}
           </div>
         )}
 
@@ -428,15 +467,15 @@ function Panel({ identity, open }: PluginContext) {
               ) : (
                 <Waiting>
                   {busy.waited > 40_000
-                    ? `${name} is waking up. The first answer after a quiet spell can take a minute or two.`
-                    : `${name} is reading its own documentation…`}
+                    ? `${name} is waking up. This can take a minute or two.`
+                    : `${name} is reading its documents…`}
                 </Waiting>
               )}
             </Exchange>
           )}
         </div>
 
-        {thread.length === 0 && !busy && signedIn && (
+        {thread.length === 0 && !busy && canAsk && (
           <div className="mt-4 flex flex-wrap gap-2">
             {suggestions.map((s) => (
               <Button key={s} onClick={() => void send(s)}>
@@ -452,7 +491,9 @@ function Panel({ identity, open }: PluginContext) {
           floating Suggest button at the bottom right. */}
       <div className="shrink-0 border-t border-[var(--line)] px-8 pt-3 pb-14">
         <p className="mb-2 text-[11px] text-[var(--faint)]">
-          {name} answers from its own documentation and can point you to the right place. It cannot change your settings, see your keys or move money.
+          {story
+            ? `Anything that sends, signs or spends waits for your passkey. In this demo nothing leaves.`
+            : `${name} can't change your settings, see your keys or move money.`}
         </p>
         <form
           onSubmit={(e) => {
@@ -467,7 +508,7 @@ function Panel({ identity, open }: PluginContext) {
             value={draft}
             rows={1}
             maxLength={800}
-            disabled={!signedIn}
+            disabled={!canAsk}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
@@ -475,14 +516,14 @@ function Panel({ identity, open }: PluginContext) {
                 void send(draft);
               }
             }}
-            placeholder={signedIn ? `Ask ${name}…` : "Sign in with your passkey to talk"}
+            placeholder={canAsk ? `Ask ${name}…` : "Sign in with your passkey to talk"}
             className="max-h-40 min-h-[1.5rem] flex-1 resize-none bg-transparent text-[15px] outline-none placeholder:text-[var(--faint)] disabled:opacity-60"
           />
           {busy ? (
             <Button type="button" variant="quiet" onClick={() => abort.current?.abort()}>
               Stop
             </Button>
-          ) : signedIn ? (
+          ) : canAsk ? (
             <kbd className="font-mono flex shrink-0 items-center gap-1 rounded-[var(--radius)] border border-[var(--line)] px-1.5 py-0.5 text-[10px] text-[var(--faint)]">
               <CornerDownLeft className="h-3 w-3" /> ask
             </kbd>

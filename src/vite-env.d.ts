@@ -9,3 +9,7 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+/** The group's own pack (`src/demo/packs/<edition>.json`), put in by vite.config.ts
+ *  for that edition's build only; null everywhere else. */
+declare const __PACK__: unknown;

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { ArrowDownUp, Copy, ExternalLink, Eye, History, KeyRound, Repeat, RefreshCw, Send, Trash2, Wallet } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { ArrowDown, ChevronDown, Copy, ExternalLink, Eye, History, KeyRound, Repeat, RefreshCw, Send, Trash2, Wallet } from "lucide-react";
 import type { PolkadotClient } from "polkadot-api";
 import type { MurmurModule, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
@@ -46,6 +46,8 @@ import {
   submitSwap,
   token,
   validWords,
+  withAsset,
+  assetById,
   type Balances,
   type Network,
   type Progress,
@@ -133,13 +135,13 @@ function Panel(_: PluginContext) {
       icon={Repeat}
       eyebrow="swap"
       title="Swap"
-      lede="Swap KSM and dUSD in one step, against the pool on the chain. Quick for small amounts. For a bigger trade at a price members set, use Exchange."
+      lede="Trade KSM and dUSD in one step. Pick what you pay, see what you get, then swap."
       actions={
         hasHub ? (
           <div className="flex items-center gap-1">
             {(["paseo", "kusama"] as Net[]).map((v) => (
               <Button key={v} variant={v === net ? "primary" : "secondary"} onClick={() => pick(v)}>
-                {NETWORKS[v].label}
+                {v === "kusama" ? "Real KSM" : "Test money"}
               </Button>
             ))}
           </div>
@@ -361,7 +363,7 @@ async function signingKey(n: Network, address: string, onProgress: (p: Progress)
 
 function SwapCard({
   client,
-  n,
+  n: base,
   address,
   bal,
   block,
@@ -375,6 +377,10 @@ function SwapCard({
   onSwapped: () => void;
 }) {
   const [from, setFrom] = useState<Side>("native");
+  const [assetId, setAssetId] = useState(base.dusd.assetId);
+  // the network with the chosen asset where dUSD stands (withAsset in lib/swap)
+  const n = useMemo(() => withAsset(base, assetById(base, assetId)), [base, assetId]);
+  useEffect(() => setAssetId(base.dusd.assetId), [base]);
   const [text, setText] = useState("");
   const [q, setQ] = useState<Quote | null>(null);
   const [fee, setFee] = useState<bigint | null>(null);
@@ -382,11 +388,13 @@ function SwapCard({
   const [quoteProblem, setQuoteProblem] = useState<string | null>(null);
   const [sure, setSure] = useState(false);
   const [progress, setProgress] = useState<Progress | null>(null);
+  const [details, setDetails] = useState(false);
+  const [inverted, setInverted] = useState(false);
 
   const tIn = token(n, from);
   const tOut = token(n, other(from));
   const amountIn = useMemo(() => parseAmount(text, tIn.decimals), [text, tIn.decimals]);
-  const held = from === "native" ? bal.native : bal.dusd;
+  const held = from === "native" ? bal.native : bal.assets[n.dusd.assetId] ?? 0n;
   const busy = progress != null && progress.stage !== "final" && progress.stage !== "failed";
 
   // Quote on every change, and again at every final block while the page is open.
@@ -450,97 +458,159 @@ function SwapCard({
         amountOut: formatAmount(r.amountOut ?? q.amountOut, tOut.decimals),
         block: r.block,
         index: r.index,
+        ...(n !== base ? { asset: n.dusd.assetId } : {}),
       });
       setText("");
       onSwapped();
     }
   };
 
+  const price = q?.pool.price ?? null;
   const rate =
-    q && q.pool
-      ? from === "native"
-        ? `1 ${n.native.symbol} = ${q.pool.price.toFixed(4)} ${n.dusd.symbol}`
-        : `1 ${n.dusd.symbol} = ${(1 / q.pool.price).toFixed(4)} ${n.native.symbol}`
-      : null;
+    price == null
+      ? null
+      : (from === "native") !== inverted
+        ? `1 ${n.native.symbol} = ${price.toFixed(4)} ${n.dusd.symbol}`
+        : `1 ${n.dusd.symbol} = ${(1 / price).toFixed(4)} ${n.native.symbol}`;
+  const impactTone = q == null ? null : q.impact >= BIG_MOVE ? "danger" : q.impact >= 0.02 ? "warn" : "ok";
+
+  // One button, and its words say what is missing, as in most swap apps.
+  const label = !canSwap(n.id)
+    ? "Real KSM swaps are not on yet: try test money"
+    : !amountIn
+      ? "Enter an amount"
+      : short
+        ? `Not enough ${tIn.symbol}`
+        : quoting
+          ? "Getting a price"
+          : quoteProblem || !q
+            ? "No price for that amount"
+            : big && !sure
+              ? "Tick the box above to swap"
+              : `Swap ${tIn.symbol} for ${tOut.symbol}`;
 
   return (
     <Card>
-      <div className="space-y-4">
-        <div>
-          <Field label="You pay">
-            <div className="flex items-center gap-2">
-              <input
-                className={inputClass + " font-mono"}
-                inputMode="decimal"
-                placeholder="0"
-                value={text}
+      <div className="space-y-3">
+        {base.assets.length > 1 && (
+          <div className="flex items-center gap-1">
+            {base.assets.map((a) => (
+              <Button
+                key={a.assetId}
+                variant={a.assetId === n.dusd.assetId ? "primary" : "secondary"}
                 disabled={busy}
-                onChange={(e) => setText(e.target.value.replace(",", "."))}
-              />
-              <span className="font-mono w-14 shrink-0 text-sm">{tIn.symbol}</span>
-            </div>
-          </Field>
-          <p className="mt-1.5 text-xs text-[var(--faint)]">
-            You hold {formatAmount(held, tIn.decimals)} {tIn.symbol}.{" "}
-            <button className="underline underline-offset-2 hover:text-[var(--fg)]" onClick={max} disabled={busy}>
-              Use it all
-            </button>
-          </p>
-        </div>
+                onClick={() => {
+                  setAssetId(a.assetId);
+                  setText("");
+                }}
+              >
+                {base.native.symbol} and {a.symbol}
+              </Button>
+            ))}
+          </div>
+        )}
 
-        <div className="flex justify-center">
-          <Button
-            variant="quiet"
-            icon={ArrowDownUp}
+        <div className="relative space-y-1.5">
+          <TokenPanel
+            label="You pay"
+            symbol={tIn.symbol}
+            foot={
+              <>
+                You hold {formatAmount(held, tIn.decimals)} {tIn.symbol}
+                <button
+                  className="ml-2 font-medium underline-offset-2 hover:underline disabled:opacity-45"
+                  style={{ color: inkOf(tIn.symbol) }}
+                  onClick={max}
+                  disabled={busy || held === 0n}
+                >
+                  Max
+                </button>
+              </>
+            }
+          >
+            <input
+              className="w-full min-w-0 bg-transparent text-3xl tabular-nums outline-none placeholder:text-[var(--faint)]"
+              inputMode="decimal"
+              placeholder="0"
+              aria-label={`Amount of ${tIn.symbol} to pay`}
+              value={text}
+              disabled={busy}
+              onChange={(e) => setText(e.target.value.replace(",", "."))}
+            />
+          </TokenPanel>
+
+          <button
+            title="Swap the other way"
+            aria-label="Swap the other way"
             disabled={busy}
             onClick={() => {
               setFrom(other(from));
               setText("");
             }}
+            className="group absolute left-1/2 top-1/2 z-10 grid h-10 w-10 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border-4 border-[var(--card)] bg-[var(--card)] ring-1 ring-[var(--line)] text-[var(--fg)] shadow-sm transition hover:text-[var(--accent)] disabled:opacity-45"
           >
-            Swap the other way
-          </Button>
-        </div>
+            <ArrowDown className="h-4 w-4 transition-transform group-hover:rotate-180" />
+          </button>
 
-        <Field label="You get">
-          <div className="flex items-center gap-2">
-            <div className={inputClass + " font-mono text-[var(--muted)]"}>
+          <TokenPanel
+            label="You get"
+            symbol={tOut.symbol}
+            foot={q ? `At least ${formatAmount(q.minOut, tOut.decimals)} ${tOut.symbol}, or nothing is swapped` : " "}
+          >
+            <div className={"w-full min-w-0 truncate text-3xl tabular-nums " + (q ? "text-[var(--fg)]" : "text-[var(--faint)]")}>
               {q ? formatAmount(q.amountOut, tOut.decimals) : quoting ? "…" : "0"}
             </div>
-            <span className="font-mono w-14 shrink-0 text-sm">{tOut.symbol}</span>
-          </div>
-        </Field>
+          </TokenPanel>
+        </div>
 
         {quoteProblem && <Notice tone="danger">{quoteProblem}</Notice>}
-        {short && <Notice tone="danger">That is more than this account holds.</Notice>}
 
         {q && (
-          <List>
-            <Row title="Price" detail={rate} />
-            <Row
-              title="Moves the pool's price by"
-              detail={`${pct(q.impact)}, plus the pool's 0.3% fee`}
-              status={<Status tone={q.impact >= BIG_MOVE ? "danger" : q.impact >= 0.02 ? "warn" : "ok"}>{pct(q.impact)}</Status>}
-            />
-            <Row
-              title="You get at least"
-              detail={`${formatAmount(q.minOut, tOut.decimals)} ${tOut.symbol}. If the price moves more than 1% first, nothing is swapped.`}
-            />
-            <Row
-              title="Network fee"
-              detail={
-                fee == null
-                  ? "Working it out"
-                  : feeInDusd
-                    ? `About ${formatAmount(fee, n.native.decimals, 6)} ${n.native.symbol}, paid in ${n.dusd.symbol}`
-                    : `About ${formatAmount(fee, n.native.decimals, 6)} ${n.native.symbol}`
-              }
-            />
-            <Row
-              title="The pool holds"
-              detail={`${formatAmount(q.pool.native, n.native.decimals, 2)} ${n.native.symbol} and ${formatAmount(q.pool.dusd, n.dusd.decimals, 2)} ${n.dusd.symbol}`}
-            />
-          </List>
+          <div className="rounded-[var(--radius)] border border-[var(--line)] text-[13px]">
+            <button
+              className="flex w-full items-center gap-2 px-3 py-2.5 text-left"
+              onClick={() => setDetails(!details)}
+              aria-expanded={details}
+            >
+              <span
+                className="font-mono text-[var(--fg)] hover:underline"
+                title="Show the price the other way round"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setInverted(!inverted);
+                }}
+              >
+                {rate}
+              </span>
+              <span className="ml-auto flex items-center gap-1.5" style={{ color: `var(--${impactTone})` }}>
+                <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                {impactTone === "ok" ? "Small move" : impactTone === "warn" ? "Moves the price" : "Big move"} {pct(q.impact)}
+              </span>
+              <ChevronDown className={"h-4 w-4 text-[var(--muted)] transition-transform " + (details ? "rotate-180" : "")} />
+            </button>
+            {details && (
+              <dl className="space-y-1.5 border-t border-[var(--line)] px-3 py-2.5 text-[var(--muted)]">
+                <Detail k="Moves the pool's price by" v={`${pct(q.impact)}, plus the pool's 0.3% fee`} />
+                <Detail k="You get at least" v={`${formatAmount(q.minOut, tOut.decimals)} ${tOut.symbol} (1% leeway)`} />
+                <Detail
+                  k="Network fee"
+                  v={
+                    fee == null
+                      ? "Working it out"
+                      : `About ${formatAmount(fee, n.native.decimals, 6)} ${n.native.symbol}${feeInDusd ? `, paid in ${n.dusd.symbol}` : ""}`
+                  }
+                />
+                <Detail
+                  k="The pool holds"
+                  v={`${formatAmount(q.pool.native, n.native.decimals, 2)} ${n.native.symbol} and ${formatAmount(q.pool.dusd, n.dusd.decimals, 2)} ${n.dusd.symbol}`}
+                />
+                <p className="pt-1 text-xs text-[var(--faint)]">
+                  The price is whatever the pool holds, so a bigger trade moves it further. For a bigger trade at a price members
+                  set, use Exchange.
+                </p>
+              </dl>
+            )}
+          </div>
         )}
 
         {big && (
@@ -556,18 +626,98 @@ function SwapCard({
           </>
         )}
 
-        {!canSwap(n.id) && (
-          <Notice>Real KSM can be quoted here but not swapped yet. Switch to test money to try a swap.</Notice>
-        )}
-
-        <div className="flex items-center gap-3">
-          <Button variant="primary" size="md" icon={Repeat} disabled={!ready} busy={busy} onClick={swap}>
-            Swap
-          </Button>
-          {progress && <SwapProgress p={progress} n={n} />}
-        </div>
+        <button
+          className="w-full rounded-[calc(var(--radius)+4px)] border px-4 py-3.5 text-[15px] font-medium transition disabled:cursor-default"
+          style={
+            ready && !busy
+              ? { borderColor: inkOf(tOut.symbol), background: wash(tOut.symbol, 14), color: "var(--fg)" }
+              : { borderColor: "var(--line)", background: "var(--card)", color: "var(--muted)" }
+          }
+          disabled={!ready || busy}
+          onClick={swap}
+        >
+          {busy ? "Swapping" : label}
+        </button>
+        {progress && <SwapProgress p={progress} n={n} />}
       </div>
     </Card>
+  );
+}
+
+// ── the parts of the swap card ──────────────────────────────────────────────
+
+/**
+ * Each token keeps one colour wherever it appears, as swap apps do with logos.
+ * Colour is the consequence here: it says which token, nothing more.
+ */
+const INK: Record<string, string> = {
+  KSM: "#111111",
+  PAS: "#e6007a",
+  dUSD: "#1f9d55",
+  BBT: "#d97706",
+};
+function inkOf(symbol: string) {
+  if (INK[symbol]) return INK[symbol];
+  let h = 0;
+  for (const c of symbol) h = (h * 31 + c.charCodeAt(0)) % 360;
+  return `hsl(${h} 60% 42%)`;
+}
+const wash = (symbol: string, pctMix: number) => `color-mix(in srgb, ${inkOf(symbol)} ${pctMix}%, var(--card))`;
+
+function TokenMark({ symbol, size = 22 }: { symbol: string; size?: number }) {
+  return (
+    <span
+      aria-hidden
+      className="grid shrink-0 place-items-center rounded-full font-semibold text-white"
+      style={{ width: size, height: size, background: inkOf(symbol), fontSize: size * 0.42 }}
+    >
+      {symbol === "dUSD" ? "$" : symbol[0]}
+    </span>
+  );
+}
+
+function TokenPanel({
+  label,
+  symbol,
+  foot,
+  children,
+}: {
+  label: string;
+  symbol: string;
+  foot: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className="rounded-[calc(var(--radius)+4px)] px-4 py-3" style={{ background: wash(symbol, 6) }}>
+      <div className="text-xs text-[var(--muted)]">{label}</div>
+      <div className="mt-1 flex items-center gap-3">
+        {children}
+        <span className="flex shrink-0 items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--card)] py-1 pl-1 pr-3 text-sm font-medium">
+          <TokenMark symbol={symbol} />
+          {symbol}
+        </span>
+      </div>
+      <div className="mt-1 min-h-4 text-xs text-[var(--faint)]">{foot}</div>
+    </div>
+  );
+}
+
+function Held({ symbol, amount }: { symbol: string; amount: string }) {
+  return (
+    <span className="flex items-center gap-2.5">
+      <TokenMark symbol={symbol} />
+      <span className="tabular-nums">{amount}</span>
+      <span className="text-[var(--muted)]">{symbol}</span>
+    </span>
+  );
+}
+
+function Detail({ k, v }: { k: string; v: ReactNode }) {
+  return (
+    <div className="flex justify-between gap-4">
+      <dt>{k}</dt>
+      <dd className="text-right text-[var(--fg)]">{v}</dd>
+    </div>
   );
 }
 
@@ -866,8 +1016,13 @@ function AccountSection({
       aside={<Button variant="quiet" icon={RefreshCw} onClick={onRefresh}>Refresh</Button>}
     >
       <List>
-        <Row title={bal ? `${formatAmount(bal.native, n.native.decimals)} ${n.native.symbol}` : `- ${n.native.symbol}`} />
-        <Row title={bal ? `${formatAmount(bal.dusd, n.dusd.decimals)} ${n.dusd.symbol}` : `- ${n.dusd.symbol}`} />
+        <Row title={<Held symbol={n.native.symbol} amount={bal ? formatAmount(bal.native, n.native.decimals) : "-"} />} />
+        {n.assets.map((a) => (
+          <Row
+            key={a.assetId}
+            title={<Held symbol={a.symbol} amount={bal ? formatAmount(bal.assets[a.assetId] ?? 0n, a.decimals) : "-"} />}
+          />
+        ))}
         <Row
           title="Address"
           detail={<span className="font-mono break-all">{address}</span>}
@@ -958,8 +1113,9 @@ function HistorySection({ n }: { n: Network }) {
       ) : (
         <List>
           {done.map((d) => {
-            const tIn = token(n, d.from);
-            const tOut = token(n, other(d.from));
+            const dn = withAsset(n, assetById(n, d.asset));
+            const tIn = token(dn, d.from);
+            const tOut = token(dn, other(d.from));
             return (
               <Row
                 key={d.block + d.index}

@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
@@ -17,8 +19,16 @@ const COLLAB_ORIGIN = process.env.COLLAB_ORIGIN || "http://127.0.0.1:52790";
 // can't open the websocket. Unset (plain web/desktop dev) keeps the defaults.
 const tauriHost = process.env.TAURI_DEV_HOST;
 
+
+// A group we are onboarding gets a demo written for it (src/demo/packs/<id>.json,
+// infra/skills/onboarding-demo). Only its own build carries it, so no other
+// edition's bundle can name the group or show what we wrote for it.
+const PACK = path.join(__dirname, "src", "demo", "packs", `${process.env.VITE_EDITION ?? ""}.json`);
+const pack = process.env.VITE_EDITION && existsSync(PACK) ? readFileSync(PACK, "utf8") : "null";
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
+  define: { __PACK__: pack },
   clearScreen: false,
   server: {
     host: tauriHost || true,

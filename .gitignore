@@ -38,3 +38,6 @@ release/*/*.deb.sig
 
 # Demo builds (scripts/editions.ts DEMOS), served behind a password by infra/services/app-updates/demo.ts
 release/demo/
+
+# The browser build of the Alder demo (www.decent.partners/try), rebuilt by `bun run build:try`.
+release/web/

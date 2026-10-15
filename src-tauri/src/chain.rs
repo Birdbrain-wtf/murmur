@@ -21,7 +21,9 @@ use std::{
 
 use serde::Serialize;
 use serde_json::{json, Value};
-use smoldot_light::{platform::default::DefaultPlatform, ChainId, Client};
+use smoldot_light::{ChainId, Client};
+
+use crate::netguard::Guarded;
 
 pub(crate) const SPEC: &str = include_str!("../chains/birdbrain.json");
 const DB_FILE: &str = "chain-db.json";
@@ -48,7 +50,7 @@ pub struct Status {
 type Reply = smol::channel::Sender<Value>;
 
 pub struct Chain {
-    client: Mutex<Client<Arc<DefaultPlatform>, ()>>,
+    client: Mutex<Client<Guarded, ()>>,
     id: ChainId,
     status: Mutex<Status>,
     pending: Mutex<HashMap<u64, Reply>>,
@@ -69,7 +71,7 @@ impl Chain {
         let db_path = data_dir.map(|d| d.join(DB_FILE));
         let db = db_path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
 
-        let mut client = Client::new(DefaultPlatform::new(
+        let mut client = Client::new(Guarded::new(
             env!("CARGO_PKG_NAME").into(),
             env!("CARGO_PKG_VERSION").into(),
         ));

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { SlidersHorizontal, Palette, Plus, X, Copy, Check, RotateCcw, KeyRound, Trash2, Lock, Blocks, Info } from "lucide-react";
+import { SlidersHorizontal, Palette, Plus, X, Copy, Check, RotateCcw, KeyRound, Trash2, Lock, BookOpen, Info, PenLine, Fingerprint, Library, Receipt, Eye } from "lucide-react";
 import { deleteSecret, listSecrets, persistent, saveSecret, validName, type SecretMeta } from "../lib/secrets";
 import { isTauri } from "../host/useUpdater";
 import { Page, PageHeader, PageBody, Section, Card, List, Row, Status, Notice, Button, Field, Facts, inputClass } from "../ui";
@@ -12,31 +12,39 @@ import {
   DECENT_DEFAULTS,
   SKIN_PRESETS,
   BRAND_PRESETS,
+  logoUrl,
   EMPTY_SKIN,
   type Skin,
 } from "../host/useSkin";
 import { app, edition } from "../edition";
+import { isDemo } from "../demo";
+import { CostsTable, monthTotal } from "../demo/costs";
+import { LensPrompt } from "../demo/lens";
+import { useInstalled } from "../host/useInstalled";
 
 /**
- * Settings: this computer. Keys in the system's secure store, what version of
- * the app this is, the chain the app follows itself, and how it looks. Who you
+ * Settings: this computer, in plain words. How the app looks, the ledger (the
+ * chain, which the app checks itself), passwords for other services kept in the
+ * system's secure store, and which version this is. Who you
  * are and your roles (membership, check-ins, the operations console) live in
  * Profile, beside the rest of your identity.
  */
-function Panel({ instance }: PluginContext) {
+function Panel({ instance, open }: PluginContext) {
   return (
     <Page>
       <PageHeader
         icon={SlidersHorizontal}
         eyebrow="settings"
         title="Settings"
-        lede="This computer: your keys, the version you're running, the chain the app follows, and how it looks."
+        lede={isDemo ? "How it looks, what it costs, and the ledger that keeps your record." : "How it looks, the ledger, and passwords for other services."}
       />
       <PageBody>
+        <Appearance instance={instance} />
+        {isDemo && <YourWay open={open} />}
+        {isDemo && <Billing />}
+        <LedgerSection />
         <Secrets />
         <About />
-        <ChainSection />
-        <Appearance instance={instance} />
       </PageBody>
     </Page>
   );
@@ -53,15 +61,15 @@ function About() {
   }, []);
   const host = new URL(app.signIn.approve).host;
   return (
-    <Section label="This app" icon={Info}>
+    <Section label="Your version" icon={Info}>
       <Card tone="quiet">
         <Row
           title={`${app.productName}${version ? ` ${version}` : ""}`}
-          status={isTauri ? <Status tone="ok">desktop app</Status> : <Status tone="warn">browser preview</Status>}
+          status={isTauri ? <Status tone="ok">desktop app</Status> : <Status tone="warn">trying it in a browser</Status>}
           detail={
             isTauri
-              ? `Updates are signed by ${app.instance.name} and come from ${host}. When one is ready you'll see it at the bottom of the window.`
-              : "The browser preview has no secure store, light client or updates. Use the desktop app for those."
+              ? `Updates come from ${host}, signed by ${app.instance.name}. A new one shows at the bottom of the window.`
+              : "The desktop app adds a locked password store, its own check of the ledger, and automatic updates."
           }
         />
       </Card>
@@ -83,7 +91,7 @@ function Appearance({ instance }: { instance: PluginContext["instance"] }) {
     <Section
       label="Appearance"
       icon={Palette}
-      lede="White stays the resting state. A skin changes the colour that appears when you use the app, the name and the corners. It applies straight away and stays on this computer."
+      lede="Your group's name, logo, colours and corners. Changes stay on this computer."
       aside={
         <Button variant="quiet" icon={RotateCcw} onClick={reset}>
           Reset to {edition.productName}
@@ -102,7 +110,7 @@ function Appearance({ instance }: { instance: PluginContext["instance"] }) {
               className="prism-hover flex items-center gap-2 rounded-[var(--radius)] border border-[var(--line-strong)] bg-[var(--card)] px-3 py-1.5 text-xs transition data-[active=true]:border-[var(--fg)]"
             >
               {p.skin.logo ? (
-                <img src={p.skin.logo as string} alt="" className="h-4 w-4 rounded-sm object-cover" />
+                <img src={logoUrl(p.skin.logo as string)} alt="" className="h-4 w-4 rounded-sm object-cover" />
               ) : (
                 <span className="flex">
                   {swatches.map((c, i) => (
@@ -136,7 +144,7 @@ function Appearance({ instance }: { instance: PluginContext["instance"] }) {
             />
           </Field>
 
-          <Field label="Logo address" hint="Leave blank to show the first letter of the name.">
+          <Field label="Logo" hint="A link to an image. Leave blank to use the first letter.">
             <input
               value={skin.logo}
               onChange={(e) => update({ logo: e.target.value })}
@@ -148,7 +156,7 @@ function Appearance({ instance }: { instance: PluginContext["instance"] }) {
           <SpectrumEditor />
 
           <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-            <Field label="Accent" hint="Focus rings, selection and links.">
+            <Field label="Highlight" hint="Links, buttons and whatever is selected.">
               <ColorRow
                 value={skin.accent || DECENT_DEFAULTS.accent}
                 isDefault={!skin.accent}
@@ -190,7 +198,7 @@ function SpectrumEditor() {
   const { skin, update } = useSkin();
   const stops = skin.spectrum.length ? skin.spectrum : DECENT_DEFAULTS.spectrum;
   return (
-    <Field label="Colours" hint="The colour that runs along the top and appears when you hover.">
+    <Field label="Colours" hint="Runs along the top and shows on hover.">
       <div className="rounded-[var(--radius)] border border-[var(--line)] p-3">
         <div
           className="mb-3 h-2 w-full rounded-full"
@@ -266,12 +274,12 @@ function Secrets() {
 
   return (
     <Section
-      label="Keys"
+      label="Passwords for other services"
       icon={KeyRound}
       lede={
         persistent
-          ? "API keys for plugins that need them, kept in this computer's secure store (the Keychain on a Mac), never in the app's own storage. Once saved, a value is not shown again: replace it or remove it."
-          : "This is the browser preview, which has no secure store. Keys saved here last until you reload. Use the desktop app to keep them."
+          ? "For plugins that use another service, such as an AI model. Kept in this computer's locked store (the Keychain on a Mac) and never shown again."
+          : "For plugins that use another service, such as an AI model. A browser has no locked store, so these are forgotten on reload. The desktop app keeps them."
       }
     >
       {list.length > 0 && (
@@ -308,7 +316,7 @@ function Secrets() {
 
       <Card>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1.4fr]">
-          <Field label="Name" hint="For example ANTHROPIC_API_KEY.">
+          <Field label="Name" hint="The name the plugin asks for, such as ANTHROPIC_API_KEY.">
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -316,7 +324,7 @@ function Secrets() {
               className={`${inputClass} font-mono text-xs`}
             />
           </Field>
-          <Field label="Value" hint="Never shown again once saved.">
+          <Field label="Password or key" hint="Hidden once saved.">
             <input
               value={value}
               onChange={(e) => setValue(e.target.value)}
@@ -353,44 +361,130 @@ function Secrets() {
   );
 }
 
-function ChainSection() {
+const STEPS = [
+  { icon: PenLine, title: "You do something", line: "Write a piece, join a call, cast a vote." },
+  { icon: Fingerprint, title: "Your key signs it", line: "Your passkey signs it, so it's provably yours." },
+  { icon: Library, title: "The ledger keeps it", line: "Anyone can check it. Nobody can rewrite it." },
+];
+
+/**
+ * The ledger is the chain (ADR 0068), named for what it does for a member. The
+ * explanation comes first; block numbers, peers and hashes sit behind a fold
+ * for anyone who wants them.
+ */
+/** What the group pays for the app, line by line (demo editions show a sample). */
+/**
+ * How you see things: each person tells the app, in their own words, how they
+ * like things explained, and the sections that can change follow. Demo only:
+ * "Her record" on Profile is the first section that reads it (demo/lens.tsx).
+ */
+function YourWay({ open }: { open: PluginContext["open"] }) {
+  return (
+    <div data-tour-section="lens" className="scroll-mt-6">
+      <Section
+        label="How you see things"
+        icon={Eye}
+        lede="Say how you like things explained, and sections show themselves that way, just for you."
+      >
+        <LensPrompt
+          onSeen={() => {
+            open("identity");
+            setTimeout(() => document.querySelector('[data-tour-section="record"]')?.scrollIntoView({ behavior: "smooth", block: "start" }), 300);
+          }}
+          seenLabel="See Alice's record"
+        />
+      </Section>
+    </div>
+  );
+}
+
+function Billing() {
+  const { installed } = useInstalled();
+  return (
+    <div data-tour-section="billing" className="scroll-mt-6">
+      <Section
+        label="Billing"
+        icon={Receipt}
+        aside={
+          <span className="font-mono text-[13px]">
+            {new Intl.NumberFormat("en-GB", { style: "currency", currency: "GBP" }).format(monthTotal(installed))}
+            <span className="font-sans text-[12px] text-[var(--faint)]"> so far this month</span>
+          </span>
+        }
+      >
+        <CostsTable installed={installed} />
+      </Section>
+    </div>
+  );
+}
+
+function LedgerSection() {
   const c = useChain();
   const ago = c?.finalizedAt ? Math.max(0, Math.round((Date.now() - c.finalizedAt) / 1000)) : null;
   const short = (h?: string | null) => (h ? `${h.slice(0, 8)}…${h.slice(-4)}` : "…");
   let line: string;
   if (!c) line = "Checking…";
-  else if (!hasLightClient) line = c.error ?? "";
-  else if (c.finalized == null) line = c.error && c.error !== "the light client is starting" ? `Not following yet: ${c.error}` : "Starting the light client and finding peers…";
-  else line = `Finalised #${c.finalized.toLocaleString()}, checked on this computer${ago != null ? ` ${ago}s ago` : ""}.`;
+  else if (!hasLightClient)
+    line = "The desktop app checks the ledger itself. A browser can't, so this is sample data.";
+  else if (c.finalized == null)
+    line = c.error && c.error !== "the light client is starting" ? `Can't reach the ledger yet: ${c.error}` : "Connecting to the ledger…";
+  else
+    line = `Up to date. Checked to page ${c.finalized.toLocaleString()}${ago != null ? `, ${ago} seconds ago` : ""}.`;
   const tone = !c ? "idle" : !hasLightClient ? "idle" : c.finalized == null ? "warn" : "ok";
   return (
     <Section
-      label="The chain"
-      icon={Blocks}
-      lede="The app follows the chain itself: it checks the chain's finality proofs instead of trusting a server. It keeps no copy and makes no blocks."
+      label="The ledger"
+      icon={BookOpen}
+      lede="Who joined, who made what, how it may be used, how votes went. Many computers hold copies and check each other, so nobody, including us, can quietly change it."
     >
+      <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {STEPS.map((step, i) => (
+          <div key={step.title} className="rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] px-4 py-3">
+            <div className="flex items-center gap-2">
+              <span className="font-mono flex h-5 w-5 items-center justify-center rounded-full border border-[var(--line-strong)] text-[10px] text-[var(--muted)]">
+                {i + 1}
+              </span>
+              <step.icon className="h-4 w-4 text-[var(--muted)]" />
+            </div>
+            <div className="font-tight mt-2 text-sm font-medium">{step.title}</div>
+            <div className="mt-1 text-[12px] leading-relaxed text-[var(--muted)]">{step.line}</div>
+          </div>
+        ))}
+      </div>
       <List>
         <div className="space-y-3">
           <Row
-            title="Light client"
+            title="Checking it for itself"
             status={
               <Status tone={tone} pulse={hasLightClient && c?.finalized == null}>
-                {!hasLightClient ? "desktop only" : c?.finalized == null ? "starting" : "following"}
+                {!hasLightClient ? "in the desktop app" : c?.finalized == null ? "connecting" : "up to date"}
               </Status>
             }
-            detail={line}
+            detail={
+              <>
+                {line} It takes no server's word for it.
+              </>
+            }
           />
           {hasLightClient && c?.finalized != null && (
-            <Facts
-              items={[
-                ["chain", c.chain],
-                ["newest", `#${c.best?.toLocaleString() ?? "…"}`],
-                ["peers", String(c.peers ?? "…")],
-                ["runtime", c.specName ? `${c.specName} ${c.specVersion}` : "…"],
-                ["finalised", short(c.finalizedHash)],
-                ["genesis", short(c.genesis)],
-              ]}
-            />
+            <details className="group">
+              <summary className="cursor-pointer list-none text-[12px] text-[var(--faint)] hover:text-[var(--fg)]">
+                <span className="group-open:hidden">Show the technical details</span>
+                <span className="hidden group-open:inline">Hide the technical details</span>
+              </summary>
+              <div className="mt-3">
+                <Facts
+                  items={[
+                    ["network", c.chain],
+                    ["newest page", `#${c.best?.toLocaleString() ?? "…"}`],
+                    ["connections", String(c.peers ?? "…")],
+                    ["ledger software", c.specName ? `${c.specName} ${c.specVersion}` : "…"],
+                    ["last sealed page", short(c.finalizedHash)],
+                    ["first page", short(c.genesis)],
+                  ]}
+                />
+              </div>
+            </details>
           )}
         </div>
         {hasLightClient && <KeepCopy />}
@@ -404,21 +498,31 @@ const mb = (n?: number | null) => (n == null ? "…" : n < 1e9 ? `${Math.round(n
 function nodeLine(n: NodeStatus): string {
   switch (n.phase) {
     case "off":
-      return "Off. Switch it on to keep a full copy of the chain on this computer.";
+      return "Off. Keep a whole copy here to make tampering harder.";
     case "fetching":
-      return n.fetchTotal ? `Fetching the node program, ${mb(n.fetchedBytes)} of ${mb(n.fetchTotal)}…` : "Fetching the node program…";
+      return n.fetchTotal ? `Downloading what it needs, ${mb(n.fetchedBytes)} of ${mb(n.fetchTotal)}…` : "Downloading what it needs…";
     case "waiting-for-power":
-      return "Paused on battery. It carries on when the computer is plugged in.";
+      return "Paused on battery. Resumes when plugged in.";
     case "starting":
-      return "Starting the node…";
+      return "Starting…";
     case "syncing":
-      return n.best != null && n.highest ? `Copying the chain: block ${n.best.toLocaleString()} of ${n.highest.toLocaleString()}.` : "Copying the chain…";
+      return n.best != null && n.highest ? `Copying the ledger: page ${n.best.toLocaleString()} of ${n.highest.toLocaleString()}.` : "Copying the ledger…";
     case "synced":
-      return `Holding a full copy, up to block ${n.best?.toLocaleString() ?? "…"}.`;
+      return `Holding a whole copy, up to page ${n.best?.toLocaleString() ?? "…"}.`;
     case "error":
-      return `Stopped: ${n.error ?? "the node wouldn't run"}`;
+      return `Stopped: ${n.error ?? "it wouldn't run"}`;
   }
 }
+
+const PHASE: Record<NodeStatus["phase"], string> = {
+  off: "off",
+  fetching: "downloading",
+  "waiting-for-power": "paused",
+  starting: "starting",
+  syncing: "copying",
+  synced: "holding a copy",
+  error: "stopped",
+};
 
 function KeepCopy() {
   const [n, setN] = useNode();
@@ -440,10 +544,10 @@ function KeepCopy() {
   return (
     <div className="space-y-3">
       <Row
-        title="Keep a copy"
+        title="Help keep the ledger"
         status={
           <Status tone={n.phase === "error" ? "danger" : on ? "ok" : n.enabled ? "warn" : "idle"} pulse={n.phase === "syncing"}>
-            {n.enabled ? n.phase.replace(/-/g, " ") : "off"}
+            {n.enabled ? PHASE[n.phase] : "off"}
           </Status>
         }
         detail={nodeLine(n)}
@@ -456,22 +560,21 @@ function KeepCopy() {
       {on && (
         <Facts
           items={[
-            ["peers", String(n.peers ?? "…")],
-            ["on disk", mb(n.diskBytes)],
-            ["node", n.version ?? "…"],
+            ["connections", String(n.peers ?? "…")],
+            ["space used", mb(n.diskBytes)],
+            ["version", n.version ?? "…"],
             ["power", n.onMains ? "plugged in" : "on battery"],
           ]}
         />
       )}
       {err && <Notice tone="danger">{err}</Notice>}
       <p className="text-xs leading-relaxed text-[var(--faint)]">
-        A full node keeps every block and helps hold the record. It is never trusted to make blocks, runs only while
-        this computer is plugged in, and stops when the app quits. The program is checked against Birdbrain's release
-        key before it runs.
+        It helps others check their copies. It only reads, never writes, runs only when plugged in and stops when the
+        app quits. The app checks who made it before it runs.
       </p>
       {!n.enabled && n.version && (
         <Button variant="quiet" disabled={busy} onClick={() => void act(removeCopy)}>
-          Delete the copy ({mb(n.diskBytes)})
+          Delete the copy and free {mb(n.diskBytes)}
         </Button>
       )}
     </div>
@@ -513,7 +616,7 @@ function ShareSkin({
   }
 
   return (
-    <Field label="Share with your group" hint="A skin is a code. Copy it and send it on, and each person pastes it to get the same look.">
+    <Field label="Share with your group" hint="Send this code. Anyone who pastes it gets the same look.">
       <div className="space-y-2">
         <div className="flex items-center gap-2">
           <code className="font-mono min-w-0 flex-1 truncate rounded-[var(--radius)] border border-[var(--line)] bg-[var(--raise)] px-3 py-2 text-[11px] text-[var(--muted)]">
@@ -530,14 +633,14 @@ function ShareSkin({
               setPaste(e.target.value);
               setError(false);
             }}
-            placeholder="Paste a skin code"
+            placeholder="Paste a code"
             className={`${inputClass} text-xs`}
           />
           <Button onClick={applyPaste} disabled={!paste.trim()}>
             Apply
           </Button>
         </div>
-        {error && <Notice tone="danger">That isn't a skin code.</Notice>}
+        {error && <Notice tone="danger">That code didn't work. Was it copied in full?</Notice>}
       </div>
     </Field>
   );
@@ -578,7 +681,7 @@ function ColorRow({
 export const settingsSurface: MurmurModule = {
   id: "settings",
   title: "Settings",
-  tagline: "Keys, sign-ins and your group's brand",
+  tagline: "How it looks, the ledger and passwords for other services",
   icon: SlidersHorizontal,
   order: 2,
   kind: "core",

@@ -1,7 +1,11 @@
+import { colourful, onInk } from "../../demo/ink";
 import { useEffect, useState } from "react";
 import { Video, ArrowUpRight, CalendarPlus, Radio, Sparkles, MapPin } from "lucide-react";
 import type { MurmurModule, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
+import { edition } from "../../edition";
+import { demoNote } from "../../demo/note";
+import { CallRoom, SCRIPTS } from "../../demo/callroom";
 import { Button, Card, Code, Eyebrow, Field, Notice, Page, PageBody, PageHeader, Status, inputClass } from "../../ui";
 import {
   checkInAtPlace,
@@ -173,7 +177,7 @@ function PlaceCard() {
     if (r.status === "recorded" || r.status === "already") {
       setNote({ ok: true, text: `You're checked in at ${r.name ?? "this place"} for today.` });
       setCode("");
-    } else if (r.status === "needs-approval") setNote({ ok: false, text: "Check-ins are off. Turn them on in Identity." });
+    } else if (r.status === "needs-approval") setNote({ ok: false, text: "Check-ins are off. Turn them on in Profile." });
     else if (r.status === "failed") setNote({ ok: false, text: r.error });
   }
 
@@ -183,12 +187,11 @@ function PlaceCard() {
         <MapPin className="h-4 w-4 text-[var(--muted)]" /> In the room together
       </div>
       <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--muted)]">
-        At a venue? Type the code on its screen. It changes every minute, so it
-        shows you were there. Only the venue's area is recorded, never where you
-        are.
+        At a venue? Type the code on its screen. Only the venue's area is
+        recorded, never where you are.
       </p>
       <div className="mt-4">
-        <Field label="Venue code" hint="Six letters and numbers, from the venue's screen.">
+        <Field label="Venue code" hint="Six letters and numbers.">
           <span className="flex gap-2">
             <input
               value={code}
@@ -250,7 +253,151 @@ function PlaceCard() {
   );
 }
 
-function Panel({ instance, identity, open }: PluginContext) {
+/**
+ * In a demo edition with a call of its own (`edition.call`), Meet shows that
+ * call as a sample: when it next happens, what the last one left in the record,
+ * and buttons that say what they would do. Nothing is fetched or joined.
+ */
+function DemoCall() {
+  const call = edition.call!;
+  const now = useNow();
+  const next = (() => {
+    const d = new Date(now);
+    for (let i = 0; i < 8; i++) {
+      const day = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + i));
+      if (day.getUTCDay() !== call.weekday) continue;
+      const at = londonInstant(day.toISOString().slice(0, 10), call.hour);
+      if (at.getTime() + CALL_WINDOW_MS > now) return at;
+    }
+    return null;
+  })();
+  const live = !!next && now >= next.getTime();
+  const label = next
+    ? next.toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "Europe/London" })
+    : "being scheduled";
+  // Joining opens the call right here, in the same window.
+  const [inCall, setInCall] = useState(false);
+  if (inCall)
+    return (
+      <Page>
+        <CallRoom
+          spec={{ title: call.name, kind: "video", people: COMING.map(([n]) => n).filter((n) => n !== "Alice").slice(0, 5), script: SCRIPTS.meet }}
+          onLeave={() => setInCall(false)}
+        />
+      </Page>
+    );
+  return (
+    <Page>
+      <PageHeader
+        icon={Video}
+        eyebrow="calls · sample"
+        title={call.name}
+        lede={
+          <>
+            {edition.instance.name}'s regular call, <span className="text-[var(--fg)]">{call.cadence}</span>. {call.line}
+          </>
+        }
+      />
+      <PageBody>
+        <Card>
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
+              {next && (
+                <div className="hidden w-16 shrink-0 overflow-hidden rounded-[10px] border border-[var(--ink)] text-center [.inked_&]:block">
+                  <div className="font-mono bg-[var(--ink)] py-1 text-[10px] uppercase tracking-[0.14em] text-[var(--ink-on)]">
+                    {next.toLocaleDateString("en-GB", { weekday: "short" })}
+                  </div>
+                  <div className="font-tight py-1.5 text-[26px] font-medium leading-none">{next.getDate()}</div>
+                </div>
+              )}
+              <div>
+                <Eyebrow>next call</Eyebrow>
+                <div className="font-tight mt-1.5 text-lg font-medium">{label}</div>
+                <div className="mt-0.5 text-[13px] text-[var(--muted)]">{call.cadence}</div>
+              </div>
+            </div>
+            <Status tone={live ? "live" : "idle"} pulse={live}>
+              {live ? "Live now" : next ? countdown(next.getTime() - now) : "Being scheduled"}
+            </Status>
+          </div>
+          <div className="mt-5 flex flex-wrap items-center gap-2">
+            <Button
+              variant="primary"
+              icon={live ? Radio : Video}
+              onClick={() => setInCall(true)}
+            >
+              {live ? "Join the live call" : `Join ${call.name}`}
+            </Button>
+            <Button icon={CalendarPlus} onClick={() => demoNote("In your own app this adds every call to your calendar.")}>
+              Add to calendar
+            </Button>
+          </div>
+          {colourful && (
+            <div className="mt-5 flex items-center gap-3">
+              <div className="flex -space-x-1.5">
+                {COMING.map(([n, c]) => (
+                  <span
+                    key={n}
+                    title={n}
+                    className="font-tight flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-medium ring-2 ring-[var(--card)]"
+                    style={{ background: c, color: onInk(c) }}
+                  >
+                    {n[0]}
+                  </span>
+                ))}
+              </div>
+              <span className="text-[13px] text-[var(--muted)]">{COMING.length} coming</span>
+            </div>
+          )}
+          <p className="mt-4 text-[13px] leading-relaxed text-[var(--muted)]">
+            One tap to join. The call opens right here.
+          </p>
+        </Card>
+
+        <Card tone="dashed">
+          <div className="font-tight flex items-center gap-2 text-sm font-medium">
+            <Sparkles className="h-4 w-4 text-[var(--ink,var(--muted))]" /> Last week, in the record
+          </div>
+          <ul className="mt-3 space-y-2 text-[13px] leading-relaxed text-[var(--muted)]">
+            {LAST_WEEK.map(([who, c, line]) => (
+              <li key={line} className="flex items-start gap-2.5">
+                <span
+                  className="font-tight mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-medium"
+                  style={colourful ? { background: c, color: onInk(c) } : { border: "1px solid var(--line-strong)" }}
+                >
+                  {who}
+                </span>
+                <span>{line}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 text-[12px] text-[var(--faint)]">
+            A sample. Each call is kept for the people who were there. Nobody else can open it, unless the
+            group lets the agent learn from it with names and details taken out.
+          </p>
+        </Card>
+      </PageBody>
+    </Page>
+  );
+}
+
+// Who's coming on Thursday, and what last week left in the record (sample).
+const COMING: [string, string][] = [
+  ["Alice", "#e5383b"], ["Bob", "#0078bf"], ["Carol", "#ff48b0"], ["Dave", "#1f9d6b"], ["Erin", "#7b4fc4"],
+  ["Frank", "#ffd400"], ["Grace", "#00a19a"], ["Heidi", "#ff7a3d"], ["Ivan", "#1a1a1a"],
+];
+const LAST_WEEK: [string, string, string][] = [
+  ["C", "#ff48b0", "Carol played two new demos. The room preferred the slower one."],
+  ["B", "#0078bf", "Bob showed the first spread of the next issue of the magazine."],
+  ["✓", "#1f9d6b", "Agreed: the open studio day goes to a vote in Chat by Friday."],
+];
+
+function Panel(ctx: PluginContext) {
+  if (edition.demo && edition.call && !ctx.identity.signedIn) return <DemoCall />;
+  return <ChaosPanel {...ctx} />;
+}
+
+function ChaosPanel({ instance, identity, open }: PluginContext) {
   const info = useChaos(instance.birdbrainBase);
   const { grant } = useParticipation();
   const now = useNow();
@@ -295,8 +442,8 @@ function Panel({ instance, identity, open }: PluginContext) {
         title="Chaos Sessions"
         lede={
           <>
-            A weekly open call, <span className="text-[var(--fg)]">{cadence}</span>. Every
-            session is recorded and transcribed into the shared record.
+            A weekly open call, <span className="text-[var(--fg)]">{cadence}</span>, recorded
+            and transcribed.
           </>
         }
       />
@@ -334,15 +481,15 @@ function Panel({ instance, identity, open }: PluginContext) {
             </a>
           </div>
           <p className="mt-4 text-[13px] leading-relaxed text-[var(--muted)]">
-            Your passkey shows you were in the room. No password, no wallet.{" "}
+            Your passkey shows you were there. No password.{" "}
             {identity.handle
               ? `You'll join as ${identity.handle}.`
-              : "Choose a handle or stay anonymous. Either way, your presence is verified."}
+              : "Join under a handle, or none."}
           </p>
           {checkInsSupported && identity.signedIn && !grant && (
             <div className="mt-2">
               <Button variant="quiet" className="!px-0" onClick={() => open("identity")}>
-                Check-ins are off. Turn them on in Identity.
+                Check-ins are off. Turn them on in Profile.
               </Button>
             </div>
           )}
@@ -356,9 +503,7 @@ function Panel({ instance, identity, open }: PluginContext) {
             <Sparkles className="h-4 w-4 text-[var(--muted)]" /> Showing up is contributing
           </div>
           <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--muted)]">
-            What's said in a session is transcribed into the shared record, so the
-            ideas and decisions stay findable afterwards. Your passkey records that
-            you were there, under your handle or none.
+            Ideas and decisions from each session stay findable in the shared record.
           </p>
           <a
             href={exploreUrl}
@@ -370,7 +515,7 @@ function Panel({ instance, identity, open }: PluginContext) {
           </a>
         </Card>
 
-        <p className="text-[12px] leading-relaxed text-[var(--faint)]">Calls run on infrastructure we host.</p>
+        <p className="text-[12px] leading-relaxed text-[var(--faint)]">We host the calls.</p>
       </PageBody>
     </Page>
   );
@@ -383,8 +528,8 @@ const LINK =
 
 export const meetPlugin: MurmurModule = {
   id: "meet",
-  title: "Chaos Sessions",
-  tagline: "A weekly open call, recorded and transcribed",
+  title: edition.demo && edition.call ? edition.call.name : "Chaos Sessions",
+  tagline: edition.demo && edition.call ? `${edition.instance.name}'s regular call` : "A weekly open call, recorded and transcribed",
   icon: Video,
   order: 15,
   kind: "plugin",

@@ -83,7 +83,12 @@ const LEGACY_KEY = "murmur.notes.v1";
 function load(): LocalNote[] {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return JSON.parse(raw) as LocalNote[];
+    if (raw) {
+      const list = JSON.parse(raw) as LocalNote[];
+      // The invented demo always has the sample member's thinking to show.
+      if (list.length || !edition.showcase) return list;
+      return sampleNotes();
+    }
     // migrate v1 ({ id, body, ts }) → local-only, unsynced
     const legacy = localStorage.getItem(LEGACY_KEY);
     if (legacy) {
@@ -102,7 +107,23 @@ function load(): LocalNote[] {
   } catch {
     /* ignore */
   }
-  return [];
+  return edition.showcase ? sampleNotes() : [];
+}
+
+/** The invented demo's sample member thinks across all her groups, here and nowhere else. */
+function sampleNotes(): LocalNote[] {
+  const day = 86_400_000;
+  const now = Date.now();
+  const n = (i: number, type: NoteType, body: string, intent: string, tags: string[]): LocalNote => ({
+    id: `sample-${i}`, body, intent, tags, people: [], type, ts: now - i * day, synced: false,
+  });
+  return [
+    n(0, "note", "Halfmoon's second film: the interviews sound boxy. Try the hall at Northside, it's quiet on weekday mornings.", "Ask the hall before I suggest it.", ["halfmoon", "northside"]),
+    n(1, "quote", "“Ten minutes each, kind and honest.”", "Keep this for the call's page.", ["huxley"]),
+    n(2, "note", "The roof piece needs the three quotes side by side, not in a list. People skim lists.", "Before it goes in the Review.", ["huxley", "roof"]),
+    n(4, "link", "https://www.gov.uk/guidance/venture-capital-schemes-raise-money-by-offering-tax-reliefs-to-investors", "SEIS limits, for the company piece.", ["seis"]),
+    n(6, "note", "Common Loaf: could the vote on the new bread supplier happen on phones, not just at the meeting?", "Raise at the general meeting.", ["loaf"]),
+  ];
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -464,9 +485,11 @@ function Panel({ instance, identity }: PluginContext) {
         eyebrow="notes"
         title="Notes"
         lede={
-          edition.vaultSync
-            ? `Capture a thought and why it matters. Notes are kept in ${edition.vaultName}, so you can find them again.`
-            : "Capture a thought and why it matters. Notes are kept on this device, yours alone."
+          edition.demo
+            ? "Your space to think. No group sees it unless you share it."
+            : edition.vaultSync
+            ? `Capture a thought and why it matters. Kept in ${edition.vaultName}.`
+            : "Capture a thought and why it matters. Kept on this device, for you alone."
         }
         actions={
           <>
@@ -547,7 +570,7 @@ function Panel({ instance, identity }: PluginContext) {
                     void capture();
                   }
                 }}
-                placeholder="Why does this matter? Optional, but it's the point."
+                placeholder="Why it matters (optional)"
                 className="w-full bg-transparent text-[13px] outline-none placeholder:text-[var(--faint)]"
               />
             </div>
@@ -591,7 +614,7 @@ function Panel({ instance, identity }: PluginContext) {
             <input
               value={query}
               onChange={(e) => void runSearch(e.target.value)}
-              placeholder="Search everything you've captured"
+              placeholder="Search your notes"
               aria-label="Search your notes"
               className={`${inputClass} pr-9 pl-9`}
             />
@@ -613,7 +636,7 @@ function Panel({ instance, identity }: PluginContext) {
           {/* Trail */}
           {showing ? (
             showing.length === 0 ? (
-              <Empty>Nothing you've captured matches “{query}”.</Empty>
+              <Empty>Nothing matches “{query}”.</Empty>
             ) : (
               <Section label={`${showing.length} result${showing.length === 1 ? "" : "s"}`}>
                 <TrailList items={showing} onRemove={removeItem} onRetry={retry} notes={notes} />
@@ -622,8 +645,8 @@ function Panel({ instance, identity }: PluginContext) {
           ) : trail.length === 0 ? (
             <Empty>
               {edition.vaultSync
-                ? `No notes yet. Your first capture starts the list and syncs to ${edition.vaultName}.`
-                : "No notes yet. Your first capture starts the list."}
+                ? `No notes yet. They sync to ${edition.vaultName}.`
+                : "No notes yet."}
             </Empty>
           ) : (
             <Section label="recent">
@@ -654,12 +677,12 @@ function Panel({ instance, identity }: PluginContext) {
             icon={Users}
             lede={
               edition.vaultSync
-                ? "Pick a room name you both type in. Everyone on the same name edits one live note. Save it to the vault when you're done."
-                : "Pick a room name you both type in. Everyone on the same name edits one live note."
+                ? "Edit one live note together. Save it to the vault when you're done."
+                : "Edit one live note together."
             }
           >
             <Card>
-              <Field label="Room name" hint="Anyone who types the same name joins the same note.">
+              <Field label="Room name" hint="Anyone who types the same name joins.">
                 <input
                   value={roomDraft}
                   onChange={(e) => setRoomDraft(e.target.value)}

@@ -46,6 +46,9 @@ mod exchange;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod hub;
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod netguard;
+
 // Calls: the window may use the microphone and camera.
 mod media;
 

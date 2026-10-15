@@ -2,6 +2,8 @@ import { useSyncExternalStore } from "react";
 import { edition } from "../edition";
 import { openInBrowser } from "../identity/passkey";
 import { appSecret } from "./secrets";
+import { sampleMe, sampleOps } from "../demo/sample";
+import { demoNote } from "../demo/note";
 
 /**
  * The connection to this edition's operations console (infra/services/ops-console),
@@ -12,13 +14,19 @@ import { appSecret } from "./secrets";
  * /ops/link?code=… there, and polls until the owner approves it with that
  * passkey. What comes back is a read-only token for seven days, kept in the
  * system's secure store. Anything that acts is still approved in the browser.
+ *
+ * proposeChange() is how the app changes something without the token acting:
+ * it sends a draft, opens /ops/approve?d=… in the browser and polls until the
+ * owner taps (or declines) there. Placing an edition is the first change.
  */
 export interface OpsMe {
   signedIn: boolean;
+  /** An investor's sign-in opens their investor room only: what they hold, the documents, and anything to sign. */
+  role?: "owner" | "investor" | null;
   who: { handle: string; name: string } | null;
   brand: string;
   company: string;
-  views: { accounts: boolean; position: boolean; shares: boolean; raise: boolean; files: boolean };
+  views: { accounts?: boolean; position?: boolean; shares?: boolean; raise?: boolean; incubation?: boolean; files?: boolean; investor?: boolean };
 }
 
 type State =
@@ -32,7 +40,10 @@ type State =
 const base = (import.meta.env.VITE_OPS_BASE as string | undefined) ?? edition.ops?.base ?? null;
 const TOKEN = `ops.${edition.id}`;
 
-let state: State = base ? { kind: "loading" } : { kind: "unavailable" };
+// A demo edition reads the template in src/demo/sample.ts, not a console.
+const demo = !!edition.demo;
+
+let state: State = demo ? { kind: "ready", me: sampleMe } : base ? { kind: "loading" } : { kind: "unavailable" };
 let token: string | null = null;
 let cancelPairing: (() => void) | null = null;
 const listeners = new Set<() => void>();
@@ -63,10 +74,26 @@ async function call(path: string, init: RequestInit = {}): Promise<Response> {
 
 /** GET a JSON view from the console. */
 export async function opsGet<T>(path: string): Promise<T> {
+  if (demo) return sampleOps(path) as T;
   const r = await call(path);
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new OpsError(j.error || `The console answered ${r.status}`, r.status);
   return j as T;
+}
+
+/**
+ * An investor signs what rich has issued to them: their statement or their agreement. The one
+ * write an investor's token has, and only for their own room (the console's appGate).
+ */
+export async function investorSign(body: Record<string, unknown>): Promise<{ ok: true; message: string }> {
+  if (demo) {
+    demoNote("In your own app this signs the document, with your typed name as your signature.");
+    throw new OpsError("Not signed: this is a demo.", 400);
+  }
+  const r = await call("/api/ops/investor/sign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new OpsError(j.error || `The console answered ${r.status}`, r.status);
+  return j;
 }
 
 /** GET raw bytes (a file) from the console. */
@@ -80,7 +107,7 @@ export async function opsBlob(path: string): Promise<Blob> {
 }
 
 async function refresh() {
-  if (!base) return;
+  if (!base || demo) return;
   if (!token) token = await appSecret.get(TOKEN).catch(() => null);
   if (!token) return set({ kind: "signed-out" });
   try {
@@ -146,14 +173,57 @@ export function cancelOpsSignIn() {
 }
 
 export async function signOutOfOps() {
+  if (demo) return demoNote("In your own app this signs this computer out of the operations console.");
   if (token) await call("/api/ops/app/signout", { method: "POST" }).catch(() => {});
   token = null;
   await appSecret.delete(TOKEN).catch(() => {});
   set({ kind: "signed-out" });
 }
 
+export type Proposal = { status: "approved" | "declined" | "failed" | "expired" | "stopped"; error?: string };
+
+/**
+ * Draft a change here, approve it in the browser. Resolves when the owner has
+ * tapped, declined, or the draft has run out (ten minutes). `onOpen` hands back
+ * the approval page so it can be opened again; `stop` ends the wait (the draft
+ * then simply runs out on the console).
+ */
+export async function proposeChange(
+  kind: "incubation.place",
+  target: string,
+  change: Record<string, unknown>,
+  opts: { onOpen?: (url: string) => void; stop?: AbortSignal } = {},
+): Promise<Proposal> {
+  if (demo) {
+    demoNote("In your own app this opens the change in your browser, where one passkey tap writes it.");
+    return { status: "stopped" };
+  }
+  const r = await call("/api/ops/app/draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, target, change }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new OpsError(j.error || `The console answered ${r.status}`, r.status);
+  const url = `${base}${j.url}`;
+  opts.onOpen?.(url);
+  await openInBrowser(url);
+  const deadline = Date.now() + (Number(j.expiresIn) || 600) * 1000;
+  while (Date.now() < deadline) {
+    await new Promise((res) => setTimeout(res, 2000));
+    if (opts.stop?.aborted) return { status: "stopped" };
+    try {
+      const p = await opsGet<{ status: string; error?: string }>(`/api/ops/app/draft/${j.id}`);
+      if (p.status !== "pending") return p as Proposal;
+    } catch (e) {
+      if (e instanceof OpsError && e.status === 401) return { status: "failed", error: "The console's sign-in ran out." };
+      /* a dropped request is not a refusal: keep waiting */
+    }
+  }
+  return { status: "expired" };
+}
+
 /** Open a page of the console itself, in the browser, where actions are approved. */
-export const openConsole = (path = "/ops") => base && openInBrowser(`${base}${path}`);
+export const openConsole = (path = "/ops") =>
+  demo
+    ? demoNote("In your own app this opens the operations console in your browser, where changes are made and approved with your passkey.")
+    : base && openInBrowser(`${base}${path}`);
 
 let started = false;
 export function useOps(): State {

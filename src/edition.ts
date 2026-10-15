@@ -17,6 +17,7 @@
  * window is in.
  */
 import { enterScope, joinedCollectives, storedCollective } from "./host/scope";
+import { normalisePack, readShape, type Shape } from "./demo/shape";
 
 export type EditionId = string;
 
@@ -78,8 +79,11 @@ export interface Edition {
   /** passkey sign-in through the member's browser: the app asks `pair` for a
    *  code, opens `approve + code` where the member's passkey lives, and polls.
    *  `grant + code` is where one tap approves the participation key that signs
-   *  check-ins (ADR 0069); an edition whose door has no grant endpoints leaves it out */
-  signIn: { pair: string; approve: string; app: string; grant?: string };
+   *  check-ins (ADR 0069); an edition whose door has no grant endpoints leaves it out.
+   *  `claim + code` is where one tap claims the member's Seed, so Profile shows
+   *  their mark. It is approved where members' own-key passkeys were made, which
+   *  may not be the edition's door; editions without Seeds leave it out */
+  signIn: { pair: string; approve: string; app: string; grant?: string; claim?: string };
   /** the company's operations console (infra/services/ops-console), which the
    *  Operations and Files plugins read; editions without one leave it out */
   ops?: { base: string };
@@ -88,6 +92,20 @@ export interface Edition {
   joinable?: EditionId[];
   /** the shared record (cc/<record>) the Fundraise plugin reads its campaigns from */
   fundraising?: { record: string };
+  /** a private demo (rung 0 of the incubation path): before its members have
+   *  logins, the app shows how it works with sample data (Operations, Chat, the
+   *  agent, Profile) and a walkthrough (`src/demo/`). Signing in turns the
+   *  samples off surface by surface. */
+  demo?: boolean;
+  /** an invented organisation, made to show the app to anyone (Huxley). Its
+   *  demo asks people to get one for their own group rather than for logins */
+  showcase?: boolean;
+  /** the collective's own regular call; in a demo, Meet shows it as a sample
+   *  instead of Decent's Chaos Sessions */
+  call?: { name: string; cadence: string; weekday: number; hour: number; line: string };
+  /** the rail's order for this edition, top to bottom; plugins not named keep
+   *  their own `order` after these */
+  rail?: string[];
 }
 
 const EDITIONS: Record<EditionId, Edition> = {
@@ -110,6 +128,7 @@ const EDITIONS: Record<EditionId, Edition> = {
       pair: "https://birdbrain.wtf/api/chaos/app/pair",
       approve: "https://birdbrain.wtf/birdbrain/app-link?code=",
       grant: "https://birdbrain.wtf/birdbrain/app-link?grant=",
+      claim: "https://birdbrain.wtf/birdbrain/app-link?claim=",
     },
   },
   decent: {
@@ -136,9 +155,47 @@ const EDITIONS: Record<EditionId, Edition> = {
       pair: "https://www.decent.partners/api/app/pair",
       approve: "https://www.decent.partners/app/link?code=",
       grant: "https://www.decent.partners/app/link?grant=",
+      // Seeds come from the calls, and the passkeys that hold members' own accounts
+      // were made at birdbrain.wtf, so the claim is approved there.
+      claim: "https://birdbrain.wtf/birdbrain/app-link?claim=",
     },
   },
 };
+
+/**
+ * The invented demo, reshaped around a visitor's own group (`demo/shape.ts`):
+ * their name, their plugins in their order, their call. Only a `showcase`
+ * build does this, and only from a sketch the visitor asked for.
+ */
+function tailor(e: Edition, s: Shape) {
+  e.productName = s.name;
+  e.instance = { ...e.instance, name: s.name };
+  e.custom = s.plugins.filter((p) => p.startsWith("made-"));
+  e.plugins = s.plugins.filter((p) => !p.startsWith("made-"));
+  e.rail = ["agent", ...s.plugins];
+  e.call = { name: s.call.name, cadence: s.call.cadence, weekday: s.call.weekday, hour: s.call.hour, line: s.call.line };
+  e.home = "agent";
+}
+
+const built = EDITIONS[(import.meta.env.VITE_EDITION as EditionId) ?? "decent"];
+/**
+ * A group we are onboarding, told as its own story (`demo/packs/<id>.json`,
+ * infra/skills/onboarding-demo): the demo edition gets everything the invented
+ * one has (the walkthrough, the colour, How it works, Alice's record), drawn
+ * from what Decent wrote for that group instead of Huxley's story.
+ */
+const pack: Shape | null = built?.demo && __PACK__ ? normalisePack(__PACK__) : null;
+if (built && pack) built.showcase = true;
+/** Whether this build is a group's own demo, written for it, rather than an invented one. */
+export const packed = !!pack;
+/** The pack itself, kept when a visitor sketches something else over it. */
+export const packShape: Shape | null = pack;
+/** The demo's own name, before any visitor's sketch replaces it. */
+export const showcaseName = built?.instance.name ?? "";
+const shape = (built?.showcase ? readShape() : null) ?? pack;
+if (built && shape) tailor(built, shape);
+/** The sketch this window shows: a visitor's own, or the group's pack. */
+export const shaped: Shape | null = shape;
 
 /** Every profile in this build, for tools outside the app that list the
  *  editions (the Incubation page on the operations console). The app reads `app`

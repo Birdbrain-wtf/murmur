@@ -180,7 +180,14 @@ const CODE_PREFIX = "decent-skin:";
 function load(): Skin {
   try {
     const raw = localStorage.getItem(KEY);
-    if (raw) return { ...EMPTY_SKIN, ...(JSON.parse(raw) as Partial<Skin>) };
+    if (raw) {
+      const saved = { ...EMPTY_SKIN, ...(JSON.parse(raw) as Partial<Skin>) };
+      // A saved look that names a brand logo no preset carries any more (a
+      // renamed edition, e.g. Alder → Huxley) is stale: wear the edition's own.
+      const retired =
+        saved.logo.startsWith("/brand/") && !BRAND_PRESETS.some((p) => p.skin.logo === saved.logo);
+      if (!retired) return saved;
+    }
   } catch {
     /* ignore */
   }
@@ -295,4 +302,12 @@ export function useSkin(): SkinContextValue {
   const ctx = useContext(SkinContext);
   if (!ctx) throw new Error("useSkin must be used within <SkinProvider>");
   return ctx;
+}
+
+/** A brand preset's logo is a path from the site root (`/brand/<id>.png`). When
+ *  the web build is served under a prefix (the "try it" build at /try/), the
+ *  path is moved under it. Other values (a full address) are left alone. */
+export function logoUrl(p: string): string {
+  if (!p.startsWith("/") || p.startsWith("//")) return p;
+  return import.meta.env.BASE_URL.replace(/\/$/, "") + p;
 }

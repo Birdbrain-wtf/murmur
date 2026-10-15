@@ -2,7 +2,9 @@ import type { MurmurModule, InstanceConfig } from "./types";
 import { identitySurface } from "../identity";
 import { notesSurface } from "../notes";
 import { settingsSurface } from "../settings";
-import { app, edition, installs, offers, STANDARD } from "../edition";
+import { app, edition, installs, offers, shaped, STANDARD } from "../edition";
+import { madeModules } from "../demo/made";
+import { howSurface } from "../demo/how";
 
 /**
  * The instance this client is bound to. Each edition ships pointed at one
@@ -30,6 +32,8 @@ export const coreModules: MurmurModule[] = [
   notesSurface,
   settingsSurface,
   identitySurface,
+  // the invented demo's closing chapter: what's underneath, and why it matters
+  ...(edition.showcase ? [howSurface] : []),
 ];
 
 /**
@@ -72,11 +76,20 @@ export const RELEASE_PLUGINS = [
   ...String(import.meta.env.VITE_EXTRA_PLUGINS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
 ];
 
-export const pluginCatalog: MurmurModule[] = Object.values(discovered)
-  .flatMap((mod) => Object.values(mod))
+/** Where a plugin sits in the rail: the edition's own order first, then its weight. */
+export function rank(m: Pick<MurmurModule, "id" | "order">): number {
+  const at = edition.rail?.indexOf(m.id) ?? -1;
+  return at >= 0 ? at - 1000 : m.order;
+}
+
+export const pluginCatalog: MurmurModule[] = [
+  ...Object.values(discovered).flatMap((mod) => Object.values(mod)),
+  // plugins sketched for a visitor's own group, in the invented demo
+  ...madeModules(shaped),
+]
   .filter(isPlugin)
   .filter((p) => RELEASE_PLUGINS.includes(p.id))
-  .sort((a, b) => a.order - b.order);
+  .sort((a, b) => rank(a) - rank(b));
 
 /** Plugins installed on a fresh client — the full v1 surface. Notes (core) is
  *  always mounted alongside these. Collaborate lives inside Notes. Anything
