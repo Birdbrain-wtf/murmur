@@ -23,7 +23,9 @@ import { openInBrowser } from "./passkey";
  * Server side: /app/pair/grant-* and /app/pair/participate in
  * infra/services/chaos-auth/server.ts.
  */
-export type Kind = "meet" | "chat" | "place";
+// ask: a plugin ask (ADR 0078, host/Asks.tsx). Its session is ask:<hash of the
+// ask>, so the check-in is the member's signature over what they asked for.
+export type Kind = "meet" | "chat" | "place" | "ask";
 
 export interface Grant {
   id: string;
@@ -219,6 +221,9 @@ export const PLACE_STEP = 60;
 function liveGrant(): Grant | null {
   return grant && grant.exp > Date.now() / 1000 + 30 ? grant : null;
 }
+
+/** The live participation key's id, for a collective's server to look its check-in up at the door. */
+export const liveGrantId = (): string | null => liveGrant()?.id ?? null;
 
 /** The places this member stewards, if any. */
 export async function stewardPlaces(): Promise<{ cell: string; name: string }[]> {

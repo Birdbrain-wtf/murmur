@@ -12,7 +12,7 @@ import type { CatalogTab } from "../host/App";
 export { askForLogins, askLabel };
 
 /**
- * Demo mode: rung 0 of the incubation path (core/state/architecture/incubation-model.md).
+ * Demo mode: rung 1 of the incubation path (a private sketch, after the conversation at rung 0) (core/state/architecture/incubation-model.md).
  *
  * A demo edition (`edition.demo`) is handed to a collective before its members
  * have logins. So that they can see how the app would work for them, the

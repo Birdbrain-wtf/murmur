@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Video, VideoOff, PhoneOff } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, PhoneOff, Circle, Square } from "lucide-react";
 import type { Participant, Room as LiveRoom, RemoteTrack } from "livekit-client";
 import { Button, Notice } from "../../ui";
 
@@ -26,6 +26,56 @@ export interface CallState {
   roomId: string;
   live: LiveRoom;
   video: boolean;
+}
+
+/**
+ * Recording, in project rooms only (ADR 0079). The switch is a state event in the
+ * room, so every app in the call reads the same thing: anyone in the call can
+ * turn it on or off, everyone sees the red bar, and someone who joins while it is
+ * on starts with their microphone off. The recorder on the chat server
+ * (infra/services/call-recorder) keeps each person's voice as its own file, so
+ * each person can take theirs or have it deleted. A room offers recording when it
+ * carries the project marker; the members room does not.
+ */
+export const RECORDING_EVENT = "partners.decent.call.recording";
+const PROJECT_EVENT = "partners.decent.project";
+
+export interface Recording {
+  offered: boolean;
+  active: boolean;
+  /** who last switched it, as a Matrix address */
+  by: string | null;
+}
+
+function readRecording(client: any, roomId: string): Recording {
+  const st = client?.getRoom?.(roomId)?.currentState;
+  const project = st?.getStateEvents?.(PROJECT_EVENT, "");
+  const rec = st?.getStateEvents?.(RECORDING_EVENT, "");
+  const c = rec?.getContent?.() ?? {};
+  return { offered: !!project, active: !!c.active, by: rec?.getSender?.() ?? null };
+}
+
+export function useRecording(client: any, roomId: string | null): Recording {
+  const [r, setR] = useState<Recording>({ offered: false, active: false, by: null });
+  useEffect(() => {
+    if (!client || !roomId) return;
+    const read = () => setR(readRecording(client, roomId));
+    read();
+    const onState = (ev: any) => {
+      if (ev?.getRoomId?.() !== roomId) return;
+      const t = ev.getType?.();
+      if (t === RECORDING_EVENT || t === PROJECT_EVENT) read();
+    };
+    client.on("RoomState.events", onState);
+    return () => {
+      client.off("RoomState.events", onState);
+    };
+  }, [client, roomId]);
+  return r;
+}
+
+export async function setRecording(client: any, call: CallState, active: boolean): Promise<void> {
+  await client.sendStateEvent(call.roomId, RECORDING_EVENT, { active, lk_room: call.live.name }, "");
 }
 
 /** Where this account's server says its relay is, from its well-known, falling back to the usual path. */
@@ -99,8 +149,10 @@ export async function joinCall(client: any, roomId: string, video: boolean): Pro
     // One membership event per device (MSC4143), the shape current Element apps read.
     { manageMediaKeys: false, useLegacyMemberEvents: false },
   );
-  // A refused microphone or camera leaves you in the call, listening.
-  await live.localParticipant.setMicrophoneEnabled(true).catch(() => {});
+  // A refused microphone or camera leaves you in the call, listening. Joining a
+  // call that is already recording leaves the microphone off: turning it on is
+  // the choice to be in the recording.
+  if (!readRecording(client, roomId).active) await live.localParticipant.setMicrophoneEnabled(true).catch(() => {});
   if (video) await live.localParticipant.setCameraEnabled(true).catch(() => {});
   return { roomId, live, video };
 }
@@ -120,13 +172,21 @@ export function CallStage({
   call,
   name,
   onLeave,
+  client,
 }: {
   call: CallState;
   name: (identity: string) => string;
   onLeave: () => void;
+  client: any;
 }) {
   const [, setTick] = useState(0);
   const [problem, setProblem] = useState<string | null>(null);
+  const recording = useRecording(client, call.roomId);
+  // A relay identity is "@user:server:device"; the room knows the person's name.
+  const nameOf = (id: string) =>
+    client?.getRoom?.(call.roomId)?.getMember?.(id.split(":").slice(0, 2).join(":"))?.name ?? name(id);
+  const [asking, setAsking] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const audioRef = useRef<HTMLDivElement>(null);
   const leaveRef = useRef(onLeave);
   leaveRef.current = onLeave;
@@ -188,11 +248,67 @@ export function CallStage({
     setTick((t) => t + 1);
   }
 
+  async function flip(active: boolean) {
+    setProblem(null);
+    setSwitching(true);
+    try {
+      await setRecording(client, call, active);
+      setAsking(false);
+    } catch {
+      setProblem(active ? "The recording did not start. Try again in a moment." : "The recording did not stop. Try again now.");
+    } finally {
+      setSwitching(false);
+    }
+  }
+
   return (
     <div className="border-b border-[var(--line)] px-8 py-4">
+      {recording.active && (
+        <div
+          role="status"
+          className="mb-3 flex flex-wrap items-center gap-2 rounded-[var(--radius)] border px-3 py-2 text-[13px]"
+          style={{ borderColor: "var(--danger)", color: "var(--danger)" }}
+        >
+          <Circle className="h-3 w-3 fill-current" />
+          <span className="font-medium">Recording</span>
+          <span className="text-[var(--muted)]">
+            {recording.by ? `Started by ${nameOf(recording.by)}. ` : ""}Each voice is kept as its own file and transcribed.
+          </span>
+          <Button variant="danger" icon={Square} busy={switching} onClick={() => void flip(false)} className="ml-auto">
+            Stop recording
+          </Button>
+        </div>
+      )}
+      {recording.active && !me.isMicrophoneEnabled && (
+        <Notice tone="warn">
+          Your microphone is off because this call is being recorded. Turn it on when you are happy to be in the recording.
+        </Notice>
+      )}
+      {asking && !recording.active && (
+        <div className="mb-3 rounded-[var(--radius)] border border-[var(--line-strong)] px-4 py-3 text-[13px] leading-relaxed">
+          <p className="font-medium">Record this call?</p>
+          <p className="mt-1 text-[var(--muted)]">
+            Everyone in the call sees a red bar while it records, and anyone can stop it. Each person's voice is kept
+            as its own file and transcribed, and the record is filed with this project and with each person's note. It
+            stays private to the people on the project and is not used to train any model.
+          </p>
+          <p className="mt-1 text-[var(--muted)]">
+            Your voice stays yours. You can take a copy of your recordings with you at any time, and you can have your
+            voice and your words deleted from ours.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <Button variant="primary" icon={Circle} busy={switching} onClick={() => void flip(true)}>
+              Start recording
+            </Button>
+            <Button variant="quiet" onClick={() => setAsking(false)}>
+              Not now
+            </Button>
+          </div>
+        </div>
+      )}
       <div className="flex flex-wrap gap-3">
         {people.map((p) => (
-          <Tile key={p.identity} p={p} label={p === me ? "You" : name(p.identity)} />
+          <Tile key={p.identity} p={p} label={p === me ? "You" : nameOf(p.identity)} />
         ))}
       </div>
       <div className="mt-3 flex items-center gap-2">
@@ -210,6 +326,11 @@ export function CallStage({
         >
           {me.isCameraEnabled ? "Camera off" : "Camera on"}
         </Button>
+        {recording.offered && !recording.active && !asking && (
+          <Button icon={Circle} onClick={() => setAsking(true)}>
+            Record
+          </Button>
+        )}
         <Button variant="danger" icon={PhoneOff} onClick={onLeave}>
           Leave
         </Button>

@@ -28,7 +28,8 @@ import {
   Dot,
 } from "../../ui";
 import { participate, today } from "../../identity/participation";
-import { CallStage, joinCall, leaveCall, useCallers, type CallState } from "./call";
+import { CallStage, joinCall, leaveCall, useCallers, useRecording, type CallState } from "./call";
+import { MyRecordings } from "./recordings";
 import { DemoChat } from "./demo";
 import { PrivateChats } from "./private";
 
@@ -123,6 +124,7 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
   const callRef = useRef<CallState | null>(null);
   callRef.current = call;
   const callers = useCallers(phase === "ready" ? client : null, activeRoom);
+  const recording = useRecording(phase === "ready" ? client : null, activeRoom);
 
   // Restore a persisted session on mount, or open chat with the passkey session
   // if there is none yet.
@@ -611,6 +613,7 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
                 {linked && <Notice tone="ok">Invite sent to {linked}.</Notice>}
                 {linkError && <Notice tone="danger">{linkError}</Notice>}
               </Section>
+              {edition.id === "decent" && identity.session && <MyRecordings session={identity.session} />}
               <Section label="this device">
                 <Button variant="danger" size="md" icon={LogOut} onClick={signOut}>
                   Sign out of chat
@@ -630,6 +633,12 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
                         {callers} in a call
                       </span>
                     )}
+                    {callers > 0 && recording.active && (
+                      <span className="flex items-center gap-1.5 font-mono text-[11px] text-[var(--danger)]">
+                        <Dot tone="danger" />
+                        recording, you join with your microphone off
+                      </span>
+                    )}
                     <Button icon={Phone} busy={calling} onClick={() => void startCall(false)}>
                       {callers > 0 ? "Join with voice" : "Voice call"}
                     </Button>
@@ -640,7 +649,7 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
                 )}
               </div>
               {call && call.roomId === activeRoom && (
-                <CallStage call={call} name={shortSender} onLeave={hangUp} />
+                <CallStage call={call} name={shortSender} onLeave={hangUp} client={client} />
               )}
               {call && call.roomId !== activeRoom && (
                 <div className="flex items-center gap-2 border-b border-[var(--line)] px-8 py-2 text-[13px] text-[var(--muted)]">

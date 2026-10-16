@@ -31,7 +31,7 @@ export interface OpsMe {
   who: { handle: string; name: string } | null;
   brand: string;
   company: string;
-  views: { accounts?: boolean; position?: boolean; shares?: boolean; raise?: boolean; incubation?: boolean; files?: boolean; investor?: boolean };
+  views: { accounts?: boolean; position?: boolean; shares?: boolean; raise?: boolean; incubation?: boolean; duties?: boolean; files?: boolean; investor?: boolean };
 }
 
 /** member: the app's own sign-in opened the console. pair: a console-only token. */
@@ -273,7 +273,7 @@ export async function proposeChange(
     demoNote("In your own app this opens the change in your browser, where one passkey tap writes it.");
     return { status: "stopped" };
   }
-  const r = await call("/api/ops/app/draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, target, change }) });
+  const r = await call("/api/ops/app/draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, target, change, ...(kind === "incubation.place" ? { ladder: 5 } : {}) }) });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new OpsError(j.error || `The console answered ${r.status}`, r.status);
   const url = `${base}${j.url}`;

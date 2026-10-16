@@ -21,6 +21,8 @@ import { DemoBar, isDemo, Tour, tourSeen } from "../demo";
 import { AccessTable } from "../demo/access";
 import { TailorDialog } from "../demo/tailor";
 import { colourful, inkVars } from "../demo/ink";
+import { AskForm, AsksSection, SearchBox, SearchResults, useRegistry } from "./Asks";
+import type { Identity } from "./types";
 
 const UPGRADE_DOT = "#af52de";
 
@@ -175,6 +177,7 @@ export default function App() {
           uninstall={uninstall}
           onOpen={open}
           onClose={() => setCatalogOpen(false)}
+          identity={identity}
         />
       )}
 
@@ -234,7 +237,9 @@ function Catalog({
   uninstall,
   onOpen,
   onClose,
+  identity,
 }: {
+  identity: Identity;
   tab: CatalogTab;
   setTab: (t: CatalogTab) => void;
   installed: string[];
@@ -245,6 +250,25 @@ function Catalog({
   onClose: () => void;
 }) {
   const access = isDemo && tab === "access";
+  // Search every plugin that exists; anything this app lacks becomes an ask (ADR 0078).
+  // The invented demos keep their own sheet: they have no collective to ask.
+  const asking = !isDemo;
+  const [q, setQ] = useState("");
+  const [ask, setAsk] = useState<null | { plugin: string | null; title: string }>(null);
+  const [filed, setFiled] = useState(0);
+  const registry = useRegistry();
+  const row = (p: MurmurModule) => (
+    <CatalogRow
+      key={p.id}
+      p={p}
+      on={isInstalled(p.id)}
+      fixed={isStandard(p.id)}
+      market={tierOf(edition, p.id) === "market"}
+      install={install}
+      uninstall={uninstall}
+      onOpen={onOpen}
+    />
+  );
   return (
     <div
       className="fixed inset-0 z-20 flex items-center justify-center bg-black/20 p-6"
@@ -297,7 +321,22 @@ function Catalog({
 
         <div className="flex flex-col gap-5 p-4">
           {access && <AccessTable installed={installed} />}
-          {!access && TIERS.map((t) => {
+          {!access && asking && ask && (
+            <AskForm
+              plugin={ask.plugin}
+              initialTitle={ask.title}
+              registry={registry}
+              carried={pluginCatalog}
+              identity={identity}
+              onBack={() => setAsk(null)}
+              onFiled={() => setFiled((n) => n + 1)}
+            />
+          )}
+          {!access && asking && !ask && <SearchBox q={q} setQ={setQ} />}
+          {!access && asking && !ask && q.trim() && (
+            <SearchResults q={q} carried={pluginCatalog} renderRow={row} registry={registry} onAsk={(plugin, title) => setAsk({ plugin, title })} />
+          )}
+          {!access && !ask && !q.trim() && TIERS.map((t) => {
             const list = pluginCatalog.filter((p) => tierOf(edition, p.id) === t.id);
             return (
               <section key={t.id} className="flex flex-col gap-2">
@@ -331,6 +370,9 @@ function Catalog({
               </section>
             );
           })}
+          {!access && asking && !ask && !q.trim() && (
+            <AsksSection onAsk={() => setAsk({ plugin: null, title: "" })} refreshKey={filed} />
+          )}
         </div>
 
       </div>

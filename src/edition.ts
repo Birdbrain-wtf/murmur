@@ -89,6 +89,11 @@ export interface Edition {
    *  channel. Always the collective's own host, never a Zo address. An edition
    *  without one gets no invite link until its door exists. */
   invite?: { base: string; update: string };
+  /** where this collective serves its plugin registry (`/plugins.json`) and takes
+   *  plugin asks (`/api/plugins/ask`): infra/services/plugin-asks, ADR 0078. Always
+   *  the collective's own host. An edition without one can search the plugins it
+   *  carries, and its asks wait on its own address. */
+  asks?: { base: string };
   /** the company's operations console (infra/services/ops-console), which the
    *  Operations and Files plugins read; editions without one leave it out */
   /** member: the console takes this edition's own sign-in (one passkey for both), otherwise the app pairs separately. */
@@ -129,12 +134,16 @@ const EDITIONS: Record<EditionId, Edition> = {
     vaultSync: false,
     vaultName: "this device",
     // Birdbrain's own writing (birdbrain.wtf/editorial/birdbrain) is its ritual,
-    // so it is custom here and offered in no other edition.
+    // so it is custom here and offered in no other edition. Decent Magazine is
+    // Decent's ritual, not Birdbrain's, so Birdbrain leaves it out of the starter
+    // set and the Journal is its reading surface (rich, 2026-10-16).
     custom: ["journal"],
-    plugins: [...STARTER, "pay"],
-    optional: ["swap", "exchange"],
+    plugins: [...STARTER.filter((id) => id !== "magazine"), "pay"],
+    optional: ["swap", "exchange", "shield"],
     privateChats: true,
     exchangeMarket: "dex.birdbrain.wtf:7232",
+    // served by Birdbrain's own box, never Zo (ADR 0076, 0078)
+    asks: { base: "https://birdbrain.wtf" },
     home: "agent",
     joinable: ["decent"],
     signIn: {
@@ -162,6 +171,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     home: "agent",
     ops: { base: "https://www.decent.partners", member: true },
     invite: { base: "https://www.decent.partners", update: "https://www.decent.partners/app/update" },
+    asks: { base: "https://www.decent.partners" },
     privateChats: true,
     joinable: ["murmur", "fttf"],
     // Decent's members, Decent's door: passkeys made at www.decent.partners. A

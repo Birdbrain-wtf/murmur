@@ -1,11 +1,12 @@
 import { colourful, onInk } from "../../demo/ink";
 import { useEffect, useState } from "react";
-import { Video, ArrowUpRight, CalendarPlus, Radio, Sparkles, MapPin } from "lucide-react";
+import { Video, ArrowRight, ArrowUpRight, CalendarPlus, Radio, Sparkles, MapPin } from "lucide-react";
 import type { MurmurModule, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
 import { edition } from "../../edition";
 import { demoNote } from "../../demo/note";
 import { CallRoom, SCRIPTS } from "../../demo/callroom";
+import { ChaosRecord } from "./record";
 import { Button, Card, Code, Eyebrow, Field, Notice, Page, PageBody, PageHeader, Status, inputClass } from "../../ui";
 import {
   checkInAtPlace,
@@ -401,6 +402,7 @@ function ChaosPanel({ instance, identity, open }: PluginContext) {
   const info = useChaos(instance.birdbrainBase);
   const { grant } = useParticipation();
   const now = useNow();
+  const [record, setRecord] = useState(false);
 
   // External, hosted surfaces. These are real pages the user opens in a
   // browser, so they must resolve to a live origin even in dev (where
@@ -408,7 +410,6 @@ function ChaosPanel({ instance, identity, open }: PluginContext) {
   const origin = instance.birdbrainBase || "https://birdbrain.wtf";
   const joinUrl = `${origin}/chaos/join`;
   const icsUrl = `${origin}/chaOS.ics`;
-  const exploreUrl = `${origin}/chaOS`;
 
   const session = info?.session ?? null;
   const start = session?.date ? londonInstant(session.date) : null;
@@ -433,6 +434,16 @@ function ChaosPanel({ instance, identity, open }: PluginContext) {
   else state = { tone: "idle", label: "Being scheduled" };
 
   const cadence = info?.cadence ?? "Mondays 15:00 UK";
+
+  if (record)
+    return (
+      <Page>
+        <PageHeader icon={Video} eyebrow="chaos sessions" title="The record" lede="What every call left behind, in the words of the people who were there." />
+        <PageBody width="wide">
+          <ChaosRecord base={instance.birdbrainBase} origin={origin} back={() => setRecord(false)} />
+        </PageBody>
+      </Page>
+    );
 
   return (
     <Page>
@@ -505,14 +516,9 @@ function ChaosPanel({ instance, identity, open }: PluginContext) {
           <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--muted)]">
             Ideas and decisions from each session stay findable in the shared record.
           </p>
-          <a
-            href={exploreUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={`${LINK} mt-4 border-[var(--line-strong)]`}
-          >
-            Explore the record <ArrowUpRight className="h-3.5 w-3.5" />
-          </a>
+          <button onClick={() => setRecord(true)} className={`${LINK} mt-4 border-[var(--line-strong)]`}>
+            Explore the record <ArrowRight className="h-3.5 w-3.5" />
+          </button>
         </Card>
 
         <p className="text-[12px] leading-relaxed text-[var(--faint)]">We host the calls.</p>
