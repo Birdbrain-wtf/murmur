@@ -55,8 +55,9 @@ interface InvitePayload {
    * Surface app onto *their own* Zo, pointed at *their own* vault.
    */
   mode: "surface" | "desktop";
-  /** machine-readable seed: the Surface deploy bundle a newcomer's agent fetches + deploys */
-  bundle: string;
+  /** machine-readable seed: the Surface deploy bundle a newcomer's agent fetches + deploys
+   *  (surface mode only; a desktop invite carries none) */
+  bundle?: string;
   /** machine-readable seed: the signed desktop-build manifest (desktop mode) */
   app: string;
   room?: string;
@@ -97,11 +98,23 @@ function Panel({ instance, identity }: PluginContext) {
   const [carrySkin, setCarrySkin] = useState(true);
   const brandName = skin.name?.trim() || instance.name;
 
-  const origin =
-    instance.birdbrainBase?.trim() ||
-    (typeof window !== "undefined" ? window.location.origin : "");
-  const appManifest = `${origin}/api/murmur/update`;
-  const bundleUrl = `${origin}/api/decent/bundle`;
+  // An invite lands at the collective's own door, never at the API host the app
+  // happens to talk to (which may be rented). No door, no link.
+  const door = edition.invite;
+  if (!door) {
+    return (
+      <Page>
+        <PageHeader
+          icon={UserPlus}
+          eyebrow="invite"
+          title="Invite someone in"
+          lede={`Invites to ${instance.name} open once it has its own address for them. Until then, nobody gets a link that points anywhere else.`}
+        />
+      </Page>
+    );
+  }
+  const origin = door.base;
+  const appManifest = door.update;
 
   const payload: InvitePayload = {
     v: INVITE_VERSION,
@@ -114,7 +127,6 @@ function Panel({ instance, identity }: PluginContext) {
       matrixHomeserver: instance.matrixHomeserver,
     },
     mode: "desktop",
-    bundle: bundleUrl,
     app: appManifest,
     ...(spec.room.trim() ? { room: spec.room.trim() } : {}),
     ...(spec.community.trim() ? { community: spec.community.trim() } : {}),

@@ -166,9 +166,9 @@ function Ready({ ctx, status }: { ctx: PluginContext; status: SimplexStatus }) {
   const [, bump] = useState(0);
   const [problem, setProblem] = useState<string | null>(null);
 
-  // The same origin the invite plugin uses for /api/murmur/invite, the
+  // The same door the invite plugin uses for /api/murmur/invite: the
   // collective's own, even in dev where birdbrainBase is "".
-  const inviteBase = instance.birdbrainBase || edition.origin;
+  const inviteBase = edition.invite?.base || instance.birdbrainBase || edition.origin;
 
   useEffect(() => {
     let gone = false;

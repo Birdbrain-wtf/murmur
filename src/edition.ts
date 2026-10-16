@@ -84,6 +84,11 @@ export interface Edition {
    *  their mark. It is approved where members' own-key passkeys were made, which
    *  may not be the edition's door; editions without Seeds leave it out */
   signIn: { pair: string; approve: string; app: string; grant?: string; claim?: string };
+  /** where this collective's invites land: `base` serves `/join` and records the
+   *  invite (infra/services/app-updates/invite.ts), `update` is its signed update
+   *  channel. Always the collective's own host, never a Zo address. An edition
+   *  without one gets no invite link until its door exists. */
+  invite?: { base: string; update: string };
   /** the company's operations console (infra/services/ops-console), which the
    *  Operations and Files plugins read; editions without one leave it out */
   /** member: the console takes this edition's own sign-in (one passkey for both), otherwise the app pairs separately. */
@@ -123,6 +128,9 @@ const EDITIONS: Record<EditionId, Edition> = {
     selfUpdate: true,
     vaultSync: false,
     vaultName: "this device",
+    // Birdbrain's own writing (birdbrain.wtf/editorial/birdbrain) is its ritual,
+    // so it is custom here and offered in no other edition.
+    custom: ["journal"],
     plugins: [...STARTER, "pay"],
     optional: ["swap", "exchange"],
     privateChats: true,
@@ -153,6 +161,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     optional: ["swap"],
     home: "agent",
     ops: { base: "https://www.decent.partners", member: true },
+    invite: { base: "https://www.decent.partners", update: "https://www.decent.partners/app/update" },
     privateChats: true,
     joinable: ["murmur", "fttf"],
     // Decent's members, Decent's door: passkeys made at www.decent.partners. A
