@@ -42,6 +42,9 @@ mod node;
 // The exchange engine: Decred's DEX client, fetched, checked and run as a child process.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod exchange;
+// Private messages: the SimpleX chat core, fetched, checked and run as a child process.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod simplex;
 // Asset Hub through a second light client, for Swap (KSM, or Paseo test money).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod hub;
@@ -71,6 +74,11 @@ pub fn run() {
         exchange::exchange_set_enabled,
         exchange::exchange_api,
         exchange::exchange_book,
+        simplex::simplex_status,
+        simplex::simplex_set_enabled,
+        simplex::simplex_remove,
+        simplex::simplex_ws,
+        simplex::simplex_invite_post,
         hub::hub_start,
         hub::hub_send
     ]);
@@ -79,6 +87,7 @@ pub fn run() {
         .manage(chain::ChainState(Default::default(), Default::default()))
         .manage(node::NodeState(Default::default()))
         .manage(exchange::ExchangeState(Default::default()))
+        .manage(simplex::SimplexState(Default::default()))
         .manage(hub::HubState::default());
     builder
         .setup(|_app| {
@@ -99,6 +108,7 @@ pub fn run() {
                         *handle.state::<node::NodeState>().0.lock().unwrap() = Some(node::Node::start(d.clone()));
                         *handle.state::<exchange::ExchangeState>().0.lock().unwrap() =
                             Some(exchange::Engine::start(d.clone(), handle.config().identifier.clone()));
+                        *handle.state::<simplex::SimplexState>().0.lock().unwrap() = Some(simplex::Core::start(d.clone()));
                     }
                     let state = handle.state::<chain::ChainState>();
                     match chain::Chain::start(dir) {
@@ -121,6 +131,9 @@ pub fn run() {
                 }
                 if let Some(e) = _handle.state::<exchange::ExchangeState>().0.lock().unwrap().as_ref() {
                     e.stop();
+                }
+                if let Some(c) = _handle.state::<simplex::SimplexState>().0.lock().unwrap().as_ref() {
+                    c.stop();
                 }
             }
         });

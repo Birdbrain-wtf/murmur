@@ -119,7 +119,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     vaultSync: false,
     vaultName: "this device",
     plugins: [...STARTER, "pay"],
-    optional: ["swap", "exchange"],
+    optional: ["swap", "exchange", "chat-p2p"],
     exchangeMarket: "dex.birdbrain.wtf:7232",
     home: "agent",
     joinable: ["decent"],
