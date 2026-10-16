@@ -55,8 +55,13 @@ const Ctx = createContext<IdentityApi | null>(null);
 export function IdentityProvider({ children }: { children: ReactNode }) {
   const [identity, setIdentity] = useState<Identity>(load);
 
+  // Saved first, then announced, so anything listening (the operations console, lib/ops.ts)
+  // reads the new session. signedOut carries the session that has just ended.
+  const [ended, setEnded] = useState<string | undefined>();
   useEffect(() => {
     localStorage.setItem(KEY, JSON.stringify(identity));
+    window.dispatchEvent(new CustomEvent("murmur:identity", { detail: { signedOut: ended } }));
+    setEnded(undefined);
   }, [identity]);
 
   const signIn = useCallback((who: SignedIn) => {
@@ -77,6 +82,7 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback(() => {
     void revoke(identity.session);
     localStorage.removeItem("murmur.matrix.session.v1");
+    setEnded(identity.session ?? undefined);
     setIdentity(SIGNED_OUT);
   }, [identity.session]);
 

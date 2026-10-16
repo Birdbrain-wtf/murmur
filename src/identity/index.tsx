@@ -657,8 +657,9 @@ function YourSeed({ session }: { session: string }) {
   );
 }
 
-/** The operator role: the company's console has its own passkey and owner
- *  list, separate from membership. The app pairs read-only. */
+/** The operator role: the company's console keeps its own list of owners, operators and
+ *  investors. Where it takes this edition's sign-in, that sign-in opens it; otherwise
+ *  the app pairs read-only with a console passkey. */
 function OperatorRole({ open }: { open: (id: string) => void }) {
   const ops = useOps();
   return (
@@ -668,7 +669,7 @@ function OperatorRole({ open }: { open: (id: string) => void }) {
           title="Operations"
           status={
             ops.kind === "ready" ? (
-              <Status tone="ok">paired</Status>
+              <Status tone="ok">{ops.via === "member" ? "with your sign-in" : "paired"}</Status>
             ) : ops.kind === "pairing" ? (
               <Status tone="live" pulse>waiting for approval</Status>
             ) : (
@@ -677,21 +678,29 @@ function OperatorRole({ open }: { open: (id: string) => void }) {
           }
           detail={
             ops.kind === "ready"
-              ? `Reading ${ops.me.company}'s console as ${ops.me.who?.name ?? "an operator"}. Changes are approved in the browser.`
-              : "For owners and operators. It has its own passkey, separate from your membership."
+              ? ops.via === "member"
+                ? `Your sign-in opens ${ops.me.company}'s console as ${ops.me.who?.name ?? "an operator"}. Changes are approved in the browser with the same passkey.`
+                : `Reading ${ops.me.company}'s console as ${ops.me.who?.name ?? "an operator"}. Changes are approved in the browser.`
+              : edition.ops?.member
+                ? "For owners, operators and investors. The passkey you sign in with opens it, if the console has you on its list."
+                : "For owners and operators. It has its own passkey, separate from your membership."
           }
           action={
             ops.kind === "ready" ? (
               <>
-                <Button variant="quiet" onClick={() => void signOutOfOps()}>
-                  Unpair
-                </Button>
+                {ops.via === "pair" && (
+                  <Button variant="quiet" onClick={() => void signOutOfOps()}>
+                    Unpair
+                  </Button>
+                )}
                 <Button onClick={() => open("operations")} trailing={ArrowUpRight}>
                   Open
                 </Button>
               </>
             ) : ops.kind === "signed-out" ? (
-              <Button onClick={() => void signInToOps()}>Pair</Button>
+              <Button variant={edition.ops?.member ? "quiet" : undefined} onClick={() => void signInToOps()}>
+                {edition.ops?.member ? "Use a console passkey" : "Pair"}
+              </Button>
             ) : null
           }
         />

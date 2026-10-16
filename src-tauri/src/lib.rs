@@ -108,7 +108,7 @@ pub fn run() {
                         *handle.state::<node::NodeState>().0.lock().unwrap() = Some(node::Node::start(d.clone()));
                         *handle.state::<exchange::ExchangeState>().0.lock().unwrap() =
                             Some(exchange::Engine::start(d.clone(), handle.config().identifier.clone()));
-                        *handle.state::<simplex::SimplexState>().0.lock().unwrap() = Some(simplex::Core::start(d.clone()));
+                        *handle.state::<simplex::SimplexState>().0.lock().unwrap() = simplex::Core::start(d.clone(), &handle.config().identifier);
                     }
                     let state = handle.state::<chain::ChainState>();
                     match chain::Chain::start(dir) {

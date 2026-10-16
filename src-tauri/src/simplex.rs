@@ -1,9 +1,11 @@
 // Private messages: the SimpleX chat core, run as a child process.
 //
-// Off by default. Switched on from the Private messages plugin (chat-p2p), the app
-// fetches the upstream simplex-chat program for this computer from birdbrain.wtf,
-// checks it against Birdbrain's release key, and runs it on the loopback with
-// Birdbrain's own SimpleX relay as its only server. The page talks to the core over
+// Off by default. Switched on from private chats in Chat, the app fetches the
+// upstream simplex-chat program for this computer from its own collective's host,
+// checks it against that collective's release key, and runs it on the loopback with
+// that collective's own SimpleX relay as its only server. Each edition has its own
+// (`Home` below): Birdbrain's on birdbrain.wtf, Decent's on Decent's box (ADR 0076
+// keeps the two apart). Editions without one have no private messages. The page talks to the core over
 // its WebSocket (src/lib/simplex/). Messages are end-to-end encrypted between the
 // two members' cores; the relay passes sealed envelopes and holds no identities.
 // Nothing here is ever read into any world model.
@@ -35,38 +37,88 @@ use std::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-const MANIFEST: &str = "https://birdbrain.wtf/app/simplex/latest.json";
-const URL_PREFIX: &str = "https://birdbrain.wtf/app/simplex/";
-// Birdbrain's release key, the same one the node and the exchange engine are checked
-// against. The program is upstream simplex-chat, re-signed by us after we fetch it
-// from simplex-chat's own GitHub release (scripts/publish-simplex.ts).
-const PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdCMjIyNURFMDY2QTk3MzcKUldRM2wyb0czaVVpZXpORXY1TG4rUFA5RVhFN2Raa3IrU09FUnJJSmx2enZaWWRtVlROQk9RU28K";
 const MAX_CRASHES: u32 = 5;
 
-// Birdbrain's SimpleX relay. Creating a queue on it needs a password; sending to a
-// queue that already exists does not. The password is not a secret in any strong
-// sense: it ships inside every build that carries it, so anyone who unpacks the app
-// can read it. It is a speed bump that keeps casual strangers from using our relay
-// as free infrastructure, nothing more. It is injected at build time from
-// MURMUR_SMP_RELAY (the full address, `smp://<fingerprint>:<password>@smp.birdbrain.wtf`)
-// by the release scripts, so it never sits in this file or the public repo. Without
-// it the build falls back to the address with no password, and the core can make no
-// new queue: no invitations, no joining. The page says so.
-const RELAY_PUBLIC: &str = "smp://xTitGU04tmLxjIS55L7Ad_WMlbhCbd1gRUFQk4B-C0g=@smp.birdbrain.wtf";
-const RELAY_FINGERPRINT: &str = "xTitGU04tmLxjIS55L7Ad_WMlbhCbd1gRUFQk4B-C0g=";
+/// Whose private messages these are: the collective's relay, where its program is
+/// published and the key it is signed with. The program is upstream simplex-chat,
+/// re-signed by us after we fetch it from simplex-chat's own GitHub release
+/// (scripts/publish-simplex.ts).
+///
+/// Creating a queue on a relay needs a password; sending to a queue that already
+/// exists does not. The password is not a secret in any strong sense: it ships
+/// inside every build that carries it, so anyone who unpacks the app can read it.
+/// It is a speed bump that keeps casual strangers from using our relay as free
+/// infrastructure, nothing more. It is injected at build time (the full address,
+/// `smp://<fingerprint>:<password>@<host>`) by the release scripts, so it never sits
+/// in this file or the public repo. Without it the build falls back to the address
+/// with no password, and the core can make no new queue: no invitations, no
+/// joining. The page says so.
+pub struct Home {
+    /// the collective's name, for messages
+    name: &'static str,
+    /// where its program is published, for messages
+    host: &'static str,
+    manifest: &'static str,
+    url_prefix: &'static str,
+    pubkey: &'static str,
+    relay_public: &'static str,
+    relay_fingerprint: &'static str,
+    relay_host: &'static str,
+    relay_built: Option<&'static str>,
+    /// Where the page may post invite events (the browser's CORS rules stop a
+    /// direct fetch from the app to /api/murmur/invite, which sends no CORS headers).
+    invite_bases: &'static [&'static str],
+}
 
-/// The relay this build uses, and whether it can create queues on it.
-fn relay() -> (String, bool) {
-    match option_env!("MURMUR_SMP_RELAY").map(str::trim) {
-        // Only ever our relay, whatever the build environment says.
-        Some(r) if r.starts_with(&format!("smp://{RELAY_FINGERPRINT}:")) && r.ends_with("@smp.birdbrain.wtf") => (r.to_string(), true),
-        _ => (RELAY_PUBLIC.to_string(), false),
+// Birdbrain's release key, the same one the node and the exchange engine are checked against.
+const BIRDBRAIN: Home = Home {
+    name: "Birdbrain",
+    host: "birdbrain.wtf",
+    manifest: "https://birdbrain.wtf/app/simplex/latest.json",
+    url_prefix: "https://birdbrain.wtf/app/simplex/",
+    pubkey: "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdCMjIyNURFMDY2QTk3MzcKUldRM2wyb0czaVVpZXpORXY1TG4rUFA5RVhFN2Raa3IrU09FUnJJSmx2enZaWWRtVlROQk9RU28K",
+    relay_public: "smp://xTitGU04tmLxjIS55L7Ad_WMlbhCbd1gRUFQk4B-C0g=@smp.birdbrain.wtf",
+    relay_fingerprint: "xTitGU04tmLxjIS55L7Ad_WMlbhCbd1gRUFQk4B-C0g=",
+    relay_host: "smp.birdbrain.wtf",
+    relay_built: option_env!("MURMUR_SMP_RELAY"),
+    invite_bases: &["https://birdbrain.wtf"],
+};
+
+// Decent's update key (the one its app updates are checked against), Decent's relay on
+// Decent's own box. It answers on matrix.decent.partners because that is the name the
+// box has; members pin the relay by its fingerprint, not its name (lab/simplex-comms).
+const DECENT: Home = Home {
+    name: "Decent",
+    host: "www.decent.partners",
+    manifest: "https://www.decent.partners/app/simplex/latest.json",
+    url_prefix: "https://www.decent.partners/app/simplex/",
+    pubkey: "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDJDMEEyODUzQTEwQjdDMjYKUldRbWZBdWhVeWdLTEZ3QVAyODVPdHN0NG1UaXI1aGM4dDdmNDhETjN1Njl5VnJUYXNBaEVqcG8K",
+    relay_public: "smp://PrEElKJdbf1GKRUt5KD-Sj5Jv7cAs3NyKUjFs5snkPo=@matrix.decent.partners",
+    relay_fingerprint: "PrEElKJdbf1GKRUt5KD-Sj5Jv7cAs3NyKUjFs5snkPo=",
+    relay_host: "matrix.decent.partners",
+    relay_built: option_env!("MURMUR_SMP_RELAY_DECENT"),
+    invite_bases: &["https://rw.zo.space", "https://www.decent.partners"],
+};
+
+/// The collective this build's private messages belong to, by its bundle id.
+pub fn home_for(identifier: &str) -> Option<&'static Home> {
+    match identifier {
+        "wtf.birdbrain.murmur" => Some(&BIRDBRAIN),
+        "partners.decent.murmur" => Some(&DECENT),
+        _ => None,
     }
 }
 
-/// Where the page may post invite events (the browser's CORS rules stop a direct
-/// fetch from the app to /api/murmur/invite, which sends no CORS headers).
-const INVITE_BASES: &[&str] = &["https://birdbrain.wtf"];
+impl Home {
+    /// The relay this build uses, and whether it can create queues on it.
+    fn relay(&self) -> (String, bool) {
+        match self.relay_built.map(str::trim) {
+            // Only ever this collective's relay, whatever the build environment says.
+            Some(r) if r.starts_with(&format!("smp://{}:", self.relay_fingerprint)) && r.ends_with(&format!("@{}", self.relay_host)) => (r.to_string(), true),
+            _ => (self.relay_public.to_string(), false),
+        }
+    }
+}
 
 #[derive(Clone, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,6 +152,7 @@ struct Running {
 }
 
 pub struct Core {
+    home: &'static Home,
     dir: PathBuf,
     pubkey: String,
     manifest: String,
@@ -128,7 +181,7 @@ fn free_port() -> Option<u16> {
     TcpListener::bind("127.0.0.1:0").ok()?.local_addr().ok().map(|a| a.port())
 }
 
-fn verify(pubkey: &str, data: &[u8], signature_b64: &str) -> Result<(), String> {
+fn verify(home: &Home, pubkey: &str, data: &[u8], signature_b64: &str) -> Result<(), String> {
     use base64::Engine;
     let b64 = base64::engine::general_purpose::STANDARD;
     let text = |s: &str| -> Result<String, String> {
@@ -136,7 +189,7 @@ fn verify(pubkey: &str, data: &[u8], signature_b64: &str) -> Result<(), String> 
     };
     let pk = minisign_verify::PublicKey::decode(&text(pubkey)?).map_err(|e| e.to_string())?;
     let sig = minisign_verify::Signature::decode(&text(signature_b64)?).map_err(|e| e.to_string())?;
-    pk.verify(data, &sig, true).map_err(|_| "the private messages program's signature does not match Birdbrain's key".into())
+    pk.verify(data, &sig, true).map_err(|_| format!("the private messages program's signature does not match {}'s key", home.name))
 }
 
 /// A SimpleX profile name: letters, digits, dot, dash and underscore, so the core's
@@ -158,22 +211,25 @@ fn safe_file_name(n: &str) -> bool {
 }
 
 impl Core {
-    pub fn start(data_dir: PathBuf) -> Arc<Core> {
-        Self::start_with(data_dir, PUBKEY.into(), MANIFEST.into())
+    /// Nothing for an edition without private messages of its own.
+    pub fn start(data_dir: PathBuf, identifier: &str) -> Option<Arc<Core>> {
+        let home = home_for(identifier)?;
+        Some(Self::start_with(data_dir, home, home.pubkey.into(), home.manifest.into()))
     }
 
-    fn start_with(data_dir: PathBuf, pubkey: String, manifest: String) -> Arc<Core> {
+    fn start_with(data_dir: PathBuf, home: &'static Home, pubkey: String, manifest: String) -> Arc<Core> {
         let dir = data_dir.join("simplex");
         let _ = std::fs::create_dir_all(dir.join("db"));
-        let (_, can_connect) = relay();
+        let (_, can_connect) = home.relay();
         let core = Arc::new(Core {
+            home,
             dir,
             pubkey,
             manifest,
             status: Mutex::new(SimplexStatus {
                 phase: "off".into(),
                 can_connect,
-                relay_host: "smp.birdbrain.wtf".into(),
+                relay_host: home.relay_host.into(),
                 ..Default::default()
             }),
             running: Mutex::new(None),
@@ -304,7 +360,7 @@ impl Core {
 
     fn get_signed(&self, client: &reqwest::blocking::Client, url: &str, signature: &str, prefix: &str, progress: bool) -> Result<Vec<u8>, String> {
         if !url.starts_with(prefix) {
-            return Err("the private messages manifest points somewhere other than birdbrain.wtf".into());
+            return Err(format!("the private messages manifest points somewhere other than {}", self.home.host));
         }
         let mut resp = client
             .get(url)
@@ -327,7 +383,7 @@ impl Core {
                 self.status.lock().unwrap().fetched_bytes = Some(gz.len() as u64);
             }
         }
-        verify(&self.pubkey, &gz, signature)?;
+        verify(self.home, &self.pubkey, &gz, signature)?;
         let mut out = Vec::new();
         flate2::read::GzDecoder::new(&gz[..]).read_to_end(&mut out).map_err(|e| e.to_string())?;
         Ok(out)
@@ -363,7 +419,7 @@ impl Core {
             .send()
             .and_then(|r| r.error_for_status())
             .and_then(|r| r.json())
-            .map_err(|e| format!("couldn't reach birdbrain.wtf for private messages: {e}"))?;
+            .map_err(|e| format!("couldn't reach {} for private messages: {e}", self.home.host))?;
         let entry = &manifest["platforms"][platform()];
         let version = entry["version"].as_str().ok_or_else(|| format!("no private messages program for {} yet", platform()))?.to_string();
         if version.contains(['/', '\\']) || version.contains("..") {
@@ -372,7 +428,7 @@ impl Core {
         if self.installed().as_deref() == Some(version.as_str()) {
             return Ok(version);
         }
-        let prefix = if self.manifest == MANIFEST { URL_PREFIX.to_string() } else { self.manifest.rsplit_once('/').map(|(p, _)| format!("{p}/")).unwrap_or_default() };
+        let prefix = if self.manifest == self.home.manifest { self.home.url_prefix.to_string() } else { self.manifest.rsplit_once('/').map(|(p, _)| format!("{p}/")).unwrap_or_default() };
 
         let lib_dir = self.dir.join("lib");
         if let Some(libs) = entry["libs"].as_array() {
@@ -434,13 +490,13 @@ impl Core {
         self.stop_leftover();
         let port = free_port().ok_or("no free port on this computer")?;
         let log = std::fs::File::create(self.dir.join("core.log")).map_err(|e| e.to_string())?;
-        let (relay, _) = relay();
+        let (relay, _) = self.home.relay();
         let name = self.settings().name.unwrap_or_else(|| "member".into());
         let mut cmd = Command::new(self.dir.join(exe_name(version)));
         cmd.arg("-d").arg(self.dir.join("db").join("murmur"))
             // The WebSocket API, which simplex-chat binds to 127.0.0.1 only.
             .arg("-p").arg(port.to_string())
-            // Birdbrain's relay and no other: the core never falls back to SimpleX's presets.
+            // The collective's relay and no other: the core never falls back to SimpleX's presets.
             .arg("-s").arg(&relay)
             .arg("-y")
             // On first start the core asks for a profile name on stdin; this answers it.
@@ -555,9 +611,9 @@ impl Core {
 
 /// Post one event to the invite graph from here rather than from the page, where
 /// the browser's CORS rules would stop it. Only the listed origins, only this path.
-fn invite_post(base: &str, body: &Value) -> Result<Value, String> {
+fn invite_post(home: &Home, base: &str, body: &Value) -> Result<Value, String> {
     let base = base.trim_end_matches('/');
-    if !INVITE_BASES.contains(&base) {
+    if !home.invite_bases.contains(&base) {
         return Err(format!("private messages can't post invites to {base}"));
     }
     if rustls::crypto::CryptoProvider::get_default().is_none() {
@@ -583,10 +639,8 @@ fn invite_post(base: &str, body: &Value) -> Result<Value, String> {
 pub fn simplex_status(state: tauri::State<'_, SimplexState>) -> SimplexStatus {
     match state.0.lock().unwrap().as_ref() {
         Some(c) => c.status(),
-        None => {
-            let (_, can_connect) = relay();
-            SimplexStatus { phase: "off".into(), can_connect, relay_host: "smp.birdbrain.wtf".into(), ..Default::default() }
-        }
+        // Still starting, or an edition with no private messages of its own.
+        None => SimplexStatus { phase: "off".into(), ..Default::default() },
     }
 }
 
@@ -611,8 +665,9 @@ pub fn simplex_ws(state: tauri::State<'_, SimplexState>) -> Option<String> {
 }
 
 #[tauri::command(async)]
-pub fn simplex_invite_post(base: String, body: Value) -> Result<Value, String> {
-    std::thread::spawn(move || invite_post(&base, &body)).join().map_err(|_| "the invite call failed".to_string())?
+pub fn simplex_invite_post(state: tauri::State<'_, SimplexState>, base: String, body: Value) -> Result<Value, String> {
+    let home = state.0.lock().unwrap().as_ref().map(|c| c.home).ok_or("private messages aren't ready yet")?;
+    std::thread::spawn(move || invite_post(home, &base, &body)).join().map_err(|_| "the invite call failed".to_string())?
 }
 
 #[cfg(test)]
@@ -629,22 +684,39 @@ mod tests {
 
     #[test]
     fn only_our_relay() {
-        let (r, can) = relay();
-        assert!(r.starts_with("smp://xTitGU04tmLxjIS55L7Ad_WMlbhCbd1gRUFQk4B-C0g="));
-        assert!(r.ends_with("@smp.birdbrain.wtf"));
-        // Built with the password: it is used. Without: the plain address, and no inviting.
-        assert_eq!(can, option_env!("MURMUR_SMP_RELAY").is_some());
+        for (home, built) in [(&BIRDBRAIN, option_env!("MURMUR_SMP_RELAY")), (&DECENT, option_env!("MURMUR_SMP_RELAY_DECENT"))] {
+            let (r, can) = home.relay();
+            assert!(r.starts_with(&format!("smp://{}", home.relay_fingerprint)));
+            assert!(r.ends_with(&format!("@{}", home.relay_host)));
+            // Built with the password: it is used. Without: the plain address, and no inviting.
+            assert_eq!(can, built.is_some());
+        }
     }
 
     #[test]
-    fn invites_only_to_birdbrain() {
-        assert!(invite_post("https://evil.example", &Value::Null).is_err());
+    fn each_edition_its_own_home() {
+        assert_eq!(home_for("wtf.birdbrain.murmur").unwrap().relay_host, "smp.birdbrain.wtf");
+        assert_eq!(home_for("partners.decent.murmur").unwrap().relay_host, "matrix.decent.partners");
+        assert!(home_for("partners.decent.fttf").is_none());
+        // Never one collective's program, relay or invite graph in another's app.
+        assert_ne!(BIRDBRAIN.pubkey, DECENT.pubkey);
+        assert!(!DECENT.url_prefix.contains("birdbrain") && !DECENT.relay_public.contains("birdbrain"));
+        assert!(DECENT.invite_bases.iter().all(|b| !b.contains("birdbrain")));
+        assert!(BIRDBRAIN.invite_bases.iter().all(|b| !b.contains("decent")));
     }
 
     #[test]
-    fn refuses_a_program_birdbrain_did_not_sign() {
+    fn invites_only_to_the_collective() {
+        assert!(invite_post(&BIRDBRAIN, "https://evil.example", &Value::Null).is_err());
+        assert!(invite_post(&DECENT, "https://birdbrain.wtf", &Value::Null).is_err());
+        assert!(invite_post(&BIRDBRAIN, "https://rw.zo.space", &Value::Null).is_err());
+    }
+
+    #[test]
+    fn refuses_a_program_its_collective_did_not_sign() {
         let sig = "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRM2wyb0czaVVpZS9hMTdqeTBackpqL0J2dm03MkFBMlRGYTd4SE92RWhyMUdOTDQ5RVgwWFZKSlRHdTBSR1ZZSytpeko5YTJiak9BMmxDZ2tNRE1EZU5XeVhIUW81ZlFJPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxMzE2NzcyCWZpbGU6c2VlZHMtbm9kZS0wLjAuMC0xOWJlNmQwMzQ3MS1saW51eC14ODZfNjQuZ3oKci9taWI3OXJOY1U0Z3RVT2VaTzlGK3hpVWlESW9QRVY1SFIyRUVlVWhJa202V3pNT25ZR1FyNThWcEpxdVJON1djays5a1dKeWpMT3R5L2JtRlR6QXc9PQo=";
-        assert!(verify(PUBKEY, b"not the program", sig).is_err());
+        assert!(verify(&BIRDBRAIN, BIRDBRAIN.pubkey, b"not the program", sig).is_err());
+        assert!(verify(&DECENT, DECENT.pubkey, b"not the program", sig).is_err());
     }
 
     // Against a real program: serves a manifest signed with a throwaway key from a
@@ -659,7 +731,7 @@ mod tests {
         let manifest = std::env::var("SIMPLEX_TEST_MANIFEST").expect("SIMPLEX_TEST_MANIFEST");
         let dir = std::env::temp_dir().join(format!("murmur-simplex-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let core = Core::start_with(dir.clone(), pubkey, manifest);
+        let core = Core::start_with(dir.clone(), &DECENT, pubkey, manifest);
         struct Guard(Arc<Core>, PathBuf);
         impl Drop for Guard {
             fn drop(&mut self) {

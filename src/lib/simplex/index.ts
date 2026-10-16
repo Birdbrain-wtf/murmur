@@ -1,9 +1,10 @@
 /**
- * Private messages (plugin `chat-p2p`) over SimpleX, on Birdbrain's own relay.
+ * Private chats (inside the Chat plugin, src/plugins/chat/private.tsx) over SimpleX,
+ * on the collective's own relay.
  *
  * The SimpleX chat core runs on this computer (src-tauri/src/simplex.rs): off by
- * default, fetched from birdbrain.wtf and checked against Birdbrain's release key
- * when the member switches it on. The page talks to it over its loopback
+ * default, fetched from the collective's own host and checked against its release
+ * key when the member switches it on. The page talks to it over its loopback
  * WebSocket with `SimpleXClient` (a copy of lab/simplex-comms/client/).
  *
  * Messages are end-to-end encrypted between the two members' cores. The relay
@@ -68,7 +69,7 @@ export function useSimplex(everyMs = 2000): SimplexStatus | null {
 /**
  * A fetch for `httpInviteSink` that posts through the app (Rust), because
  * /api/murmur/invite sends no CORS headers and the window's own fetch would be
- * refused. Rust allows birdbrain.wtf only.
+ * refused. Rust allows the collective's own hosts only.
  */
 export const appFetch: typeof fetch = async (input, init) => {
   const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);

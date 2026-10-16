@@ -9,11 +9,16 @@ import { demoNote } from "../demo/note";
  * The connection to this edition's operations console (infra/services/ops-console),
  * shared by the Operations and Files plugins and shown in Settings.
  *
- * The console is owner-only and locked with its own passkey, which lives in the
- * browser at the console's host. So the app asks for a pairing code, opens
- * /ops/link?code=… there, and polls until the owner approves it with that
- * passkey. What comes back is a read-only token for seven days, kept in the
- * system's secure store. Anything that acts is still approved in the browser.
+ * One sign-in first: where the console takes this edition's member sign-in
+ * (Decent's does, infra/services/ops-console/member.ts), the app reads it with the
+ * session it already holds, and the same passkey approves changes in the browser.
+ * The console still decides who may read what, from its own list.
+ *
+ * Otherwise (FTTF's console, or an investor with a console-only passkey) the app
+ * pairs: it asks for a code, opens /ops/link?code=… in the browser, and polls
+ * until that passkey approves it. What comes back is a read-only token for seven
+ * days, kept in the system's secure store. Anything that acts is still approved
+ * in the browser.
  *
  * proposeChange() is how the app changes something without the token acting:
  * it sends a draft, opens /ops/approve?d=… in the browser and polls until the
@@ -29,12 +34,17 @@ export interface OpsMe {
   views: { accounts?: boolean; position?: boolean; shares?: boolean; raise?: boolean; incubation?: boolean; files?: boolean; investor?: boolean };
 }
 
+/** member: the app's own sign-in opened the console. pair: a console-only token. */
+export type OpsVia = "member" | "pair";
+/** Why the console is shut: the app is not signed in, or this sign-in has no place on the console's list. */
+export type OpsShut = "app-signed-out" | "no-access";
+
 type State =
   | { kind: "unavailable" }
   | { kind: "loading" }
-  | { kind: "signed-out"; error?: string }
+  | { kind: "signed-out"; error?: string; why?: OpsShut }
   | { kind: "pairing"; code: string; url: string }
-  | { kind: "ready"; me: OpsMe };
+  | { kind: "ready"; me: OpsMe; via: OpsVia };
 
 // VITE_OPS_BASE points a dev build at a local console (see infra/services/ops-console/test/app-e2e.ts).
 const base = (import.meta.env.VITE_OPS_BASE as string | undefined) ?? edition.ops?.base ?? null;
@@ -43,8 +53,19 @@ const TOKEN = `ops.${edition.id}`;
 // A demo edition reads the template in src/demo/sample.ts, not a console.
 const demo = !!edition.demo;
 
-let state: State = demo ? { kind: "ready", me: sampleMe } : base ? { kind: "loading" } : { kind: "unavailable" };
+let state: State = demo ? { kind: "ready", me: sampleMe, via: "member" } : base ? { kind: "loading" } : { kind: "unavailable" };
 let token: string | null = null;
+let via: OpsVia | null = null;
+
+/** The app's own session (useIdentity keeps it), if it has not run out. */
+function appSession(): string | null {
+  try {
+    const id = JSON.parse(localStorage.getItem("murmur.identity.v1") || "null");
+    return id?.session && (!id.sessionExp || id.sessionExp > Date.now() / 1000) ? String(id.session) : null;
+  } catch {
+    return null;
+  }
+}
 let cancelPairing: (() => void) | null = null;
 const listeners = new Set<() => void>();
 const set = (s: State) => {
@@ -64,10 +85,12 @@ async function call(path: string, init: RequestInit = {}): Promise<Response> {
   if (token) headers.Authorization = `Bearer ${token}`;
   const r = await fetch(`${base}${path}`, { ...init, headers });
   if (r.status === 401 && token) {
-    // Expired or revoked: forget it and ask again.
+    // Expired or revoked: forget it and ask again. The app's own session is the app's to keep.
+    if (via === "pair") await appSecret.delete(TOKEN).catch(() => {});
+    const was = via;
     token = null;
-    await appSecret.delete(TOKEN).catch(() => {});
-    set({ kind: "signed-out", error: "The console's sign-in ran out. Sign in again." });
+    via = null;
+    set({ kind: "signed-out", error: was === "pair" ? "The console's sign-in ran out. Sign in again." : undefined, why: appSession() ? "no-access" : "app-signed-out" });
   }
   return r;
 }
@@ -106,16 +129,64 @@ export async function opsBlob(path: string): Promise<Blob> {
   return r.blob();
 }
 
+/** Does this bearer open the console? Asked without touching the current token. */
+async function meWith(bearer: string): Promise<OpsMe | null> {
+  try {
+    const r = await fetch(`${base}/api/ops/me`, { headers: { Accept: "application/json", Authorization: `Bearer ${bearer}` } });
+    if (!r.ok) return null;
+    const me = (await r.json()) as OpsMe;
+    return me.signedIn ? me : null;
+  } catch {
+    return null;
+  }
+}
+
 async function refresh() {
   if (!base || demo) return;
-  if (!token) token = await appSecret.get(TOKEN).catch(() => null);
-  if (!token) return set({ kind: "signed-out" });
-  try {
-    const me = await opsGet<OpsMe>("/api/ops/me");
-    set(me.signedIn ? { kind: "ready", me } : { kind: "signed-out" });
-  } catch (e) {
-    if (state.kind !== "signed-out") set({ kind: "signed-out", error: (e as Error).message });
+  // The app's own sign-in first: one passkey for the app and the console.
+  const session = appSession();
+  if (session) {
+    const me = await meWith(session);
+    if (me) {
+      token = session;
+      via = "member";
+      return set({ kind: "ready", me, via });
+    }
   }
+  // Then a token this computer paired with the console on its own.
+  const paired = await appSecret.get(TOKEN).catch(() => null);
+  if (paired) {
+    const me = await meWith(paired);
+    if (me) {
+      token = paired;
+      via = "pair";
+      return set({ kind: "ready", me, via });
+    }
+    await appSecret.delete(TOKEN).catch(() => {});
+  }
+  token = null;
+  via = null;
+  set({ kind: "signed-out", why: session ? "no-access" : "app-signed-out" });
+}
+
+/** How the console was opened; a member sign-in has no separate sign-out. */
+export const opsVia = () => via;
+
+/** Look again, e.g. after the app signs in. */
+export const refreshOps = () => void refresh();
+
+// The app signing in or out changes what opens the console. Signing out also ends the
+// console's reads for that session at once, rather than when the session runs out.
+if (typeof window !== "undefined" && !demo) {
+  window.addEventListener("murmur:identity", (e) => {
+    const old = (e as CustomEvent<{ signedOut?: string }>).detail?.signedOut;
+    if (old && via === "member" && base) {
+      void fetch(`${base}/api/ops/app/signout`, { method: "POST", headers: { Authorization: `Bearer ${old}` } }).catch(() => {});
+      token = null;
+      via = null;
+    }
+    if (started) void refresh();
+  });
 }
 
 function device() {
@@ -151,6 +222,7 @@ export async function signInToOps() {
         const r = await post("/api/ops/app/pair/poll", { code, secret });
         if (r.status === "approved" && r.token) {
           token = r.token;
+          via = "pair";
           await appSecret.set(TOKEN, r.token);
           cancelPairing = null;
           return refresh();
@@ -172,12 +244,15 @@ export function cancelOpsSignIn() {
   set({ kind: "signed-out" });
 }
 
+/** Ends a paired token. With the app's own sign-in there is nothing separate to end: signing out of the app does it. */
 export async function signOutOfOps() {
   if (demo) return demoNote("In your own app this signs this computer out of the operations console.");
+  if (via === "member") return;
   if (token) await call("/api/ops/app/signout", { method: "POST" }).catch(() => {});
   token = null;
+  via = null;
   await appSecret.delete(TOKEN).catch(() => {});
-  set({ kind: "signed-out" });
+  set({ kind: "signed-out", why: appSession() ? "no-access" : "app-signed-out" });
 }
 
 export type Proposal = { status: "approved" | "declined" | "failed" | "expired" | "stopped"; error?: string };

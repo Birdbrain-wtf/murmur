@@ -1,7 +1,7 @@
 {
   "name": "murmur",
   "private": true,
-  "version": "0.4.10",
+  "version": "0.4.11",
   "type": "module",
   "description": "Murmur, Birdbrain's open app: notes, people and groups in one window, on your own machine.",
   "scripts": {

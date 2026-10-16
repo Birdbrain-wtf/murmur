@@ -86,7 +86,12 @@ export interface Edition {
   signIn: { pair: string; approve: string; app: string; grant?: string; claim?: string };
   /** the company's operations console (infra/services/ops-console), which the
    *  Operations and Files plugins read; editions without one leave it out */
-  ops?: { base: string };
+  /** member: the console takes this edition's own sign-in (one passkey for both), otherwise the app pairs separately. */
+  ops?: { base: string; member?: boolean };
+  /** Chat offers private one-to-one chats beside the group rooms (SimpleX, on the
+   *  collective's own relay; src/plugins/chat/private.tsx). Only for an edition whose
+   *  bundle id has a relay in src-tauri/src/simplex.rs (`home_for`). */
+  privateChats?: boolean;
   /** the other collectives a member of this app can add beside its own, each
    *  opening in its own space with its own skin, plugins and sign-in */
   joinable?: EditionId[];
@@ -119,7 +124,8 @@ const EDITIONS: Record<EditionId, Edition> = {
     vaultSync: false,
     vaultName: "this device",
     plugins: [...STARTER, "pay"],
-    optional: ["swap", "exchange", "chat-p2p"],
+    optional: ["swap", "exchange"],
+    privateChats: true,
     exchangeMarket: "dex.birdbrain.wtf:7232",
     home: "agent",
     joinable: ["decent"],
@@ -146,7 +152,8 @@ const EDITIONS: Record<EditionId, Edition> = {
     plugins: ["chat", "pay", "operations", "files", "invite"],
     optional: ["swap"],
     home: "agent",
-    ops: { base: "https://www.decent.partners" },
+    ops: { base: "https://www.decent.partners", member: true },
+    privateChats: true,
     joinable: ["murmur", "fttf"],
     // Decent's members, Decent's door: passkeys made at www.decent.partners. A
     // passkey belongs to the host that made it, so this is never Birdbrain's door.

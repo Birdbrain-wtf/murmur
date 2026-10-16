@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   MessageSquare,
   Hash,
@@ -10,6 +10,7 @@ import {
   Link2,
   Phone,
   Video,
+  LockKeyhole,
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
@@ -29,6 +30,7 @@ import {
 import { participate, today } from "../../identity/participation";
 import { CallStage, joinCall, leaveCall, useCallers, type CallState } from "./call";
 import { DemoChat } from "./demo";
+import { PrivateChats } from "./private";
 
 /**
  * Chat plugin — Matrix.
@@ -74,11 +76,25 @@ const SESSION_KEY = "murmur.matrix.session.v1";
 
 /** A demo edition shows sample rooms until the member signs in (`./demo.tsx`). */
 function Panel(ctx: PluginContext) {
+  const [side, setSide] = useState<"rooms" | "private">("rooms");
   if (edition.demo && !(ctx.identity.signedIn && ctx.identity.session)) return <DemoChat {...ctx} />;
-  return <LivePanel {...ctx} />;
+  // One Chat for the member: the group rooms (Matrix) and private chats (SimpleX),
+  // two engines underneath that never mix (rich 2026-10-16).
+  const switcher = edition.privateChats ? (
+    <div role="group" aria-label="Chat" className="flex gap-2">
+      <Button variant={side === "rooms" ? "primary" : "quiet"} icon={Hash} aria-pressed={side === "rooms"} onClick={() => setSide("rooms")}>
+        Group rooms
+      </Button>
+      <Button variant={side === "private" ? "primary" : "quiet"} icon={LockKeyhole} aria-pressed={side === "private"} onClick={() => setSide("private")}>
+        Private chats
+      </Button>
+    </div>
+  ) : undefined;
+  if (side === "private" && switcher) return <PrivateChats ctx={ctx} switcher={switcher} />;
+  return <LivePanel {...ctx} switcher={switcher} />;
 }
 
-function LivePanel({ identity, open }: PluginContext) {
+function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: ReactNode }) {
   const [client, setClient] = useState<any>(null);
   const [phase, setPhase] = useState<"loggedout" | "connecting" | "ready">(
     "loggedout",
@@ -436,6 +452,7 @@ function LivePanel({ identity, open }: PluginContext) {
       eyebrow="chat"
       title="Chat"
       lede={`Talk to the people in your ${groupWord}.${identity.handle ? ` Signed in as ${identity.handle}.` : ""}`}
+      actions={switcher}
     />
   );
 

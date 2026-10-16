@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Copy, KeyRound, Link2, LockKeyhole, MessageSquareLock, Power, RefreshCw, Send, Trash2, UserPlus, Users } from "lucide-react";
-import type { MurmurModule, PluginContext } from "../../host/types";
-import { issues } from "../../host/support";
+import type { ReactNode } from "react";
+import type { PluginContext } from "../../host/types";
 import { edition } from "../../edition";
 import { approve, participate, supported as checkInsSupported, useParticipation } from "../../identity/participation";
 import {
@@ -40,10 +40,13 @@ import { httpInviteSink } from "../../lib/simplex/inviteGraph";
 import { Trust, isControl, type Pending } from "../../lib/simplex/trust";
 
 /**
- * Private messages: one-to-one conversations over SimpleX, on Birdbrain's own
- * relay. It sits beside Chat (Matrix) and never replaces it: Chat is where a
- * group talks and is remembered, this is where two people talk and nothing is kept
- * anywhere but their own computers.
+ * Private chats: one-to-one conversations over SimpleX, on the collective's own
+ * relay (Birdbrain's on birdbrain.wtf, Decent's on Decent's box). They sit inside
+ * Chat beside the group rooms (Matrix), one tap away, and never mix with them:
+ * group rooms are where a group talks and is remembered, a private chat is where
+ * two people talk and nothing is kept anywhere but their own computers. One plugin
+ * for the member, two engines underneath (rich 2026-10-16; was the separate
+ * `chat-p2p` plugin until then). Only editions with `privateChats` offer it.
  *
  * The SimpleX core runs on this computer (src-tauri/src/simplex.rs). Inviting
  * someone makes a one-time link and an entry in the invite graph, and the trust
@@ -54,7 +57,8 @@ import { Trust, isControl, type Pending } from "../../lib/simplex/trust";
 
 const mb = (n?: number | null) => (n ? (n / 1e6).toFixed(0) : "0");
 
-function Panel(ctx: PluginContext) {
+/** The private side of Chat. `switcher` is the group rooms / private chats switch. */
+export function PrivateChats({ ctx, switcher }: { ctx: PluginContext; switcher: ReactNode }) {
   const status = useSimplex();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
@@ -75,9 +79,10 @@ function Panel(ctx: PluginContext) {
   const header = (
     <PageHeader
       icon={MessageSquareLock}
-      eyebrow="private messages"
-      title="Private messages"
-      lede="Talk one to one with another member. Messages are end-to-end encrypted, so only the two of you and your devices can read them. Birdbrain's relay carries them sealed and never learns who is talking. They are never read into Birdbrain's memory."
+      eyebrow="chat"
+      title="Private chats"
+      lede={`Talk one to one with another member. Messages are end-to-end encrypted, so only the two of you and your devices can read them. ${edition.productName}'s relay carries them sealed and never learns who is talking. They are never read into ${edition.productName}'s memory, and they never appear in the group rooms.`}
+      actions={switcher}
     />
   );
 
@@ -86,7 +91,7 @@ function Panel(ctx: PluginContext) {
       <Page>
         {header}
         <PageBody>
-          <Gate icon={MessageSquareLock} title="Private messages run in the desktop app">
+          <Gate icon={MessageSquareLock} title="Private chats run in the desktop app">
             <p>Your keys and your conversations are kept on your own computer, which a browser tab can't do.</p>
           </Gate>
         </PageBody>
@@ -119,21 +124,21 @@ function Panel(ctx: PluginContext) {
         {!status || status.phase === "off" ? (
           <Gate
             icon={Power}
-            title="Switch on private messages"
+            title="Switch on private chats"
             action={<Button variant="primary" icon={Power} busy={busy} onClick={() => toggle(true)}>Switch on</Button>}
           >
             <p>
-              This computer fetches the messaging program, checks it against Birdbrain's release key, and runs it here.
-              Your contacts and messages stay on this computer.
+              This computer fetches the messaging program, checks it against {edition.productName}'s release key, and runs it here.
+              Your contacts and messages stay on this computer. Private chats are new and still being tested.
             </p>
           </Gate>
         ) : status.phase === "fetching" ? (
           <Waiting>Fetching the messaging program ({mb(status.fetchedBytes)} of {mb(status.fetchTotal)} MB)</Waiting>
         ) : status.phase === "starting" ? (
-          <Waiting>Starting private messages</Waiting>
+          <Waiting>Starting private chats</Waiting>
         ) : status.phase === "error" ? (
           <Card>
-            <Notice tone="danger">{status.error ?? "Private messages stopped."}</Notice>
+            <Notice tone="danger">{status.error ?? "Private chats stopped."}</Notice>
             <div className="mt-3 flex gap-2">
               <Button icon={RefreshCw} busy={busy} onClick={() => toggle(true)}>Try again</Button>
               <Button variant="quiet" onClick={() => toggle(false)}>Switch off</Button>
@@ -162,7 +167,7 @@ function Ready({ ctx, status }: { ctx: PluginContext; status: SimplexStatus }) {
   const [problem, setProblem] = useState<string | null>(null);
 
   // The same origin the invite plugin uses for /api/murmur/invite, the
-  // collective's own (birdbrain.wtf), even in dev where birdbrainBase is "".
+  // collective's own, even in dev where birdbrainBase is "".
   const inviteBase = instance.birdbrainBase || edition.origin;
 
   useEffect(() => {
@@ -182,7 +187,7 @@ function Ready({ ctx, status }: { ctx: PluginContext; status: SimplexStatus }) {
         await new Promise((r) => setTimeout(r, 1000));
       }
       if (gone) return c?.close();
-      if (!c) return setProblem("Couldn't reach private messages on this computer. Switch it off and on again.");
+      if (!c) return setProblem("Couldn't reach private chats on this computer. Switch it off and on again.");
       const t = new Trust({
         chat: c,
         me: { handle: identity.handle!, did: identity.did ?? null },
@@ -283,8 +288,8 @@ function Ready({ ctx, status }: { ctx: PluginContext; status: SimplexStatus }) {
             </div>
           ) : (
             <Notice tone="warn">
-              This copy of the app can't start new conversations, so inviting and joining are off. Install the app from
-              birdbrain.wtf/download to use them.
+              This copy of the app can't start new conversations, so inviting and joining are off. Update the app to
+              use them.
             </Notice>
           )}
           <Section label="Conversations" icon={Users}>
@@ -547,7 +552,7 @@ function ThisComputer({ status }: { status: SimplexStatus }) {
       <Card tone="quiet">
         <Facts items={[["program", status.version ?? "-"], ["relay", status.relayHost]]} />
         <div className="mt-3 flex flex-wrap gap-2">
-          <Button variant="quiet" busy={busy} onClick={() => act(() => setSimplexEnabled(false))}>Switch off private messages</Button>
+          <Button variant="quiet" busy={busy} onClick={() => act(() => setSimplexEnabled(false))}>Switch off private chats</Button>
           {confirm ? (
             <Button variant="danger" icon={Trash2} busy={busy} onClick={() => act(removeSimplex)}>Delete them from this computer</Button>
           ) : (
@@ -564,19 +569,3 @@ function ThisComputer({ status }: { status: SimplexStatus }) {
     </Section>
   );
 }
-
-export const chatP2pPlugin: MurmurModule = {
-  id: "chat-p2p",
-  title: "Private messages",
-  tagline: "One to one, end-to-end encrypted, kept only on your two computers",
-  icon: MessageSquareLock,
-  // just after Chat (20), which it sits beside and never replaces
-  order: 21,
-  kind: "plugin",
-  // early and for testing until it is ready for real use; drop this when it is
-  lab: true,
-  // where help and bug reports for this plugin go
-  support: issues("chat-p2p"),
-  backend: "SimpleX, Birdbrain's own relay",
-  Panel,
-};

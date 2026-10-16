@@ -41,3 +41,4 @@ release/demo/
 
 # The browser build of the Alder demo (www.decent.partners/try), rebuilt by `bun run build:try`.
 release/web/
+release/simplex/
