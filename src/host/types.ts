@@ -98,6 +98,7 @@ export interface Identity {
 /** What the host passes to each module panel. */
 export interface PluginContext {
   identity: Identity;
+  installed?: string[];
   /** the instance this client is bound to (its own birdbrain) */
   instance: InstanceConfig;
   /** ask the host to switch the active module */

@@ -1,15 +1,7 @@
 import type { CSSProperties } from "react";
 import { edition, shaped } from "../edition";
 
-/**
- * Each surface's ink, in the invented demo. Huxley's look is black and white,
- * and the Review showed that a little printed colour lifts the whole thing, so
- * every section carries one ink from the same risograph set: in its header,
- * its rail button, its section labels and its bars. Colour still means
- * something: it tells you where you are. Only showcase builds wear it, so the
- * real editions keep their own look.
- */
-export const colourful = !!edition.showcase;
+export const colourful = true;
 
 const INKS: Record<string, string> = {
   agent: "#7b4fc4",
@@ -53,7 +45,12 @@ function light(hex: string) {
 
 /** The CSS variables a surface reads its ink from (`--ink`, `--ink-wash`, `--ink-on`). */
 export function inkVars(id: string): CSSProperties {
-  if (!colourful) return {};
+  if (!edition.showcase) return {
+    "--ink": "var(--accent)",
+    "--ink-on": "var(--fg)",
+    "--ink-wash": "color-mix(in srgb, var(--accent) 3%, var(--bg))",
+    "--ink-soft": "color-mix(in srgb, var(--accent) 9%, var(--bg))",
+  } as CSSProperties;
   const ink = inkOf(id);
   return {
     "--ink": ink,

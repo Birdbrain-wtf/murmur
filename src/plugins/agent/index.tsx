@@ -11,8 +11,8 @@ import {
 import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
 import { edition, groupWord, installs, shaped } from "../../edition";
-import { Button, Notice, Page, PageHeader, Waiting } from "../../ui";
-import { getModule } from "../../host/registry";
+import { Button, Notice, Page, PageHeader, Section, Waiting } from "../../ui";
+import { getModule, pluginCatalog } from "../../host/registry";
 import { listSecrets } from "../../lib/secrets";
 import { useOps } from "../../lib/ops";
 import { supported as checkInsSupported, useParticipation } from "../../identity/participation";
@@ -93,7 +93,7 @@ interface Step {
   ask: string;
 }
 
-function useSetup(identity: PluginContext["identity"]): Step[] {
+function useSetup(identity: PluginContext["identity"], installed: string[]): Step[] {
   const { grant } = useParticipation();
   const ops = useOps();
   const [, tick] = useState(0);
@@ -112,7 +112,7 @@ function useSetup(identity: PluginContext["identity"]): Step[] {
     };
   }, []);
 
-  const has = (id: string) => installs(edition).includes(id);
+  const has = (id: string) => installed.includes(id);
   const signedIn = !!(identity.signedIn && identity.session);
   const steps: Step[] = [
     {
@@ -146,17 +146,17 @@ function useSetup(identity: PluginContext["identity"]): Step[] {
   }
   steps.push({
     id: "keys",
-    title: "Add your keys",
-    hint: "Kept in this computer's secure store.",
+    title: "Passwords for other services",
+    hint: "Optional. Add one when a service needs it.",
     done: listSecrets().length > 0,
     place: "settings",
     ask: "How do I add an API key, and what are keys for?",
   });
-  if (edition.ops) {
+  if (edition.ops && has("operations")) {
     steps.push({
       id: "ops",
-      title: "Pair Operations",
-      hint: "See the company's accounts, if you run it.",
+      title: "Open Operations",
+      hint: "For people who look after the company's accounts.",
       done: ops.kind === "ready",
       place: "operations",
       ask: "How do I see the company's accounts?",
@@ -243,12 +243,13 @@ async function ask(
 
 // ── the panel ───────────────────────────────────────────────────────────────
 
-function Panel({ identity, open }: PluginContext) {
-  const steps = useSetup(identity);
+function Panel({ identity, open, installed: installedIds }: PluginContext) {
+  const installed = (installedIds ?? installs(edition)).filter((id) => !!getModule(id));
+  const steps = useSetup(identity, installed);
   const [thread, setThread] = useState<Turn[]>(loadThread);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<{ q: string; text: string; waited: number } | null>(null);
-  const [folded, setFolded] = useState(() => localStorage.getItem(FOLD_KEY) === "1");
+  const [folded, setFolded] = useState(() => localStorage.getItem(FOLD_KEY) !== "0");
   const abort = useRef<AbortController | null>(null);
   const end = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
@@ -274,8 +275,6 @@ function Panel({ identity, open }: PluginContext) {
   useEffect(() => {
     localStorage.setItem(FOLD_KEY, folded ? "1" : "0");
   }, [folded]);
-
-  const installed = useMemo(() => installs(edition).filter((id) => !!getModule(id)), []);
 
   async function send(raw: string) {
     const q = raw.trim();
@@ -371,7 +370,38 @@ function Panel({ identity, open }: PluginContext) {
         }
       />
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
+      <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-6 md:px-8">
+        {!edition.demo && thread.length === 0 && !busy && (
+          <section className="max-w-4xl space-y-5">
+            {!signedIn && (
+              <div className="flex flex-wrap items-center justify-between gap-4 rounded-[var(--radius)] border border-[var(--line)] bg-[var(--ink-wash,var(--raise))] p-5">
+                <div>
+                  <h2 className="font-tight text-lg font-medium">Make yourself at home</h2>
+                  <p className="mt-1 text-sm text-[var(--muted)]">Explore below, or sign in to talk to {name}.</p>
+                </div>
+                <PlaceButton place="identity" open={open} label="Sign in" />
+              </div>
+            )}
+            <Section label="Your workspace">
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {pluginCatalog.filter((mod) => mod.id !== "agent" && installed.includes(mod.id)).map((mod) => {
+                  const id = mod.id;
+                  const Icon = mod.icon;
+                  return (
+                    <button key={id} onClick={() => open(id)} className="prism-hover group flex items-start gap-3 rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] p-4 text-left hover:border-[var(--line-strong)] hover:bg-[var(--raise)]">
+                      <Icon className="mt-0.5 h-5 w-5 shrink-0 text-[var(--muted)]" />
+                      <span className="min-w-0 flex-1">
+                        <span className="font-tight block text-sm font-medium">{mod.title}{mod.lab ? " (lab)" : ""}</span>
+                        <span className="mt-1 block text-xs leading-relaxed text-[var(--muted)]">{mod.tagline}</span>
+                      </span>
+                      <ArrowUpRight className="h-3.5 w-3.5 shrink-0 text-[var(--muted)]" />
+                    </button>
+                  );
+                })}
+              </div>
+            </Section>
+          </section>
+        )}
         {/* every showcase demo: how you'll use it, from a screen per thing to the read to a conversation */}
         {edition.showcase && (
           <Horizon
@@ -386,9 +416,11 @@ function Panel({ identity, open }: PluginContext) {
         {!story && <section className="mb-6 overflow-hidden rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)]">
           <button
             onClick={() => setFolded((f) => !f)}
+            aria-expanded={!folded}
+            aria-controls="agent-setup"
             className="flex w-full items-center gap-3 px-5 py-3.5 text-left"
           >
-            <span className="font-tight text-sm font-medium">{allDone ? "You're set up" : "Getting set up"}</span>
+            <span className="font-tight text-sm font-medium">{allDone ? "You're set up" : "Set up what you need"}</span>
             <span className="font-mono text-[11px] text-[var(--faint)]">
               {doneCount} of {steps.length}
             </span>
@@ -398,7 +430,7 @@ function Panel({ identity, open }: PluginContext) {
             <ChevronDown className={`h-4 w-4 text-[var(--faint)] transition ${folded ? "-rotate-90" : ""}`} />
           </button>
           {!folded && (
-            <ol className="border-t border-[var(--line)]">
+            <ol id="agent-setup" className="border-t border-[var(--line)]">
               {steps.map((s) => (
                 <li key={s.id} className="flex items-center gap-3 border-t border-[var(--line)] px-5 py-3 first:border-t-0">
                   <span
@@ -410,7 +442,7 @@ function Panel({ identity, open }: PluginContext) {
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className={`font-tight text-sm ${s.done ? "text-[var(--muted)]" : "font-medium text-[var(--fg)]"}`}>{s.title}</div>
-                    {!s.done && <div className="truncate text-[13px] text-[var(--muted)]">{s.hint}</div>}
+                    {!s.done && <div className="text-[13px] text-[var(--muted)]">{s.hint}</div>}
                   </div>
                   {!s.done && (
                     <>
@@ -437,7 +469,7 @@ function Panel({ identity, open }: PluginContext) {
               ? `I'm ${name}. In this demo I answer from a script. Try one of these.`
               : signedIn
               ? `Hello${identity.handle ? ` ${identity.handle}` : ""}. I'm ${name}. Ask me anything, or start with one of these.`
-              : `I'm ${name}. Sign in with your passkey first, using the list above.`}
+              : `Sign in when you're ready to ask ${name} a question.`}
           </div>
         )}
 
@@ -489,7 +521,7 @@ function Panel({ identity, open }: PluginContext) {
 
       {/* The hint sits above the input and the foot leaves room for the host's
           floating Suggest button at the bottom right. */}
-      <div className="shrink-0 border-t border-[var(--line)] px-8 pt-3 pb-14">
+      {canAsk && <div className="shrink-0 border-t border-[var(--line)] px-5 pt-3 pb-14 md:px-8">
         <p className="mb-2 text-[11px] text-[var(--faint)]">
           {story
             ? `Anything that sends, signs or spends waits for your passkey. In this demo nothing leaves.`
@@ -524,14 +556,12 @@ function Panel({ identity, open }: PluginContext) {
               Stop
             </Button>
           ) : canAsk ? (
-            <kbd className="font-mono flex shrink-0 items-center gap-1 rounded-[var(--radius)] border border-[var(--line)] px-1.5 py-0.5 text-[10px] text-[var(--faint)]">
-              <CornerDownLeft className="h-3 w-3" /> ask
-            </kbd>
+            <Button type="submit" variant="primary" icon={CornerDownLeft} disabled={!draft.trim()}>Ask</Button>
           ) : (
             <PlaceButton place="identity" open={open} label="Sign in" />
           )}
         </form>
-      </div>
+      </div>}
     </Page>
   );
 }

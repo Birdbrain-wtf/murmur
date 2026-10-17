@@ -35,7 +35,7 @@ export function PageHeader({
   children?: ReactNode;
 }) {
   return (
-    <header className="relative shrink-0 border-b border-[var(--line)] bg-[var(--ink-wash,transparent)] px-8 pt-7 pb-5">
+    <header className="page-header relative shrink-0 border-b border-[var(--line)] bg-[var(--ink-wash,transparent)] px-5 pt-6 pb-5 md:px-8">
       {/* In the demo each surface wears its own ink (demo/ink.ts): a band, a chip and a wash. */}
       <span aria-hidden className="absolute inset-x-0 top-0 h-1 bg-[var(--ink,transparent)]" />
       {/* On phones the actions drop under the title and wrap, so a header with
@@ -45,8 +45,8 @@ export function PageHeader({
           <div className="[.inked_&_svg]:hidden">
             <Eyebrow icon={Icon}>{eyebrow}</Eyebrow>
           </div>
-          <h1 className="font-tight mt-2 flex items-center gap-3 text-2xl font-medium tracking-[-0.01em]">
-            <span className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[var(--ink)] text-[var(--ink-on)] [.inked_&]:flex">
+          <h1 className="font-tight mt-2 flex items-center gap-3 text-2xl font-medium tracking-[-0.025em] md:text-[28px]">
+            <span className="header-icon hidden h-10 w-10 shrink-0 items-center justify-center rounded-[12px] bg-[var(--ink)] text-[var(--ink-on)] [.inked_&]:flex">
               <Icon className="h-[18px] w-[18px]" />
             </span>
             <span className="min-w-0">{title}</span>
@@ -74,7 +74,7 @@ export function PageBody({
   className?: string;
 }) {
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto px-8 pt-6 pb-20">
+    <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-6 pb-20 md:px-8">
       <div className={cx(WIDTH[width], "space-y-8", className)}>{children}</div>
     </div>
   );
@@ -155,7 +155,7 @@ export function Row({
   action?: ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4">
+    <div className="flex flex-wrap items-start justify-between gap-4">
       <div className="flex min-w-0 items-start gap-3">
         {Icon && <Icon className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ink,var(--muted))]" />}
         <div className="min-w-0">
@@ -249,7 +249,7 @@ export function Button({
       {...rest}
       disabled={rest.disabled || busy}
       className={cx(
-        "inline-flex shrink-0 items-center justify-center gap-1.5 rounded-[var(--radius)] transition disabled:cursor-default disabled:opacity-45",
+        "inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-[var(--radius)] transition disabled:cursor-default disabled:opacity-45",
         variant !== "quiet" && "prism-hover border bg-[var(--card)]",
         size === "sm" ? "px-3 py-1.5 text-xs" : "px-4 py-2.5 text-sm",
         variant === "primary" && "border-[var(--fg)] font-medium text-[var(--fg)]",

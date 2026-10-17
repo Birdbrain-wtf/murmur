@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Plus, X, Fingerprint, ArrowUpRight } from "lucide-react";
 import type { MurmurModule } from "./types";
 import {
@@ -87,12 +87,12 @@ export default function App() {
           puts it under the panel); md+ restores the vertical left rail. */}
       <div className="flex min-h-0 flex-1 flex-col-reverse md:flex-row">
         {/* ── rail / bottom tab bar ── */}
-        <nav className="flex w-full shrink-0 flex-row items-center justify-around border-t border-[var(--line)] px-2 py-2 pb-[calc(0.5rem_+_env(safe-area-inset-bottom))] md:w-16 md:flex-col md:justify-start md:border-t-0 md:border-r md:px-0 md:py-4 md:pb-4">
+        <nav aria-label="App navigation" className="app-nav">
           <CollectiveSwitcher name={skinnedInstance.name} logo={skinnedInstance.logo} />
 
           {/* body: core (notes) + installed plugins + add */}
           {/* On a phone the plugins scroll sideways when there are more than fit. */}
-          <div className="flex min-w-0 flex-1 flex-row items-center justify-start gap-1.5 overflow-x-auto px-1 sm:justify-around md:mt-6 md:flex-col md:justify-start md:overflow-visible md:px-0">
+          <div className="nav-plugins">
             {/* In a demo, Notes sits at the foot with Profile: yours, not the group's. */}
             {!isDemo && <RailButton mod={notes} active={active.id === notes.id} onClick={open} />}
 
@@ -110,15 +110,17 @@ export default function App() {
             <button
               onClick={() => setCatalogOpen("plugins")}
               title="Add a plugin"
+              aria-label="Plugins"
               data-tour="catalog"
-              className="prism-hover flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius)] border border-dashed border-[var(--line-strong)] text-[var(--faint)] transition hover:text-[var(--fg)]"
+              className="rail-button prism-hover border border-dashed border-[var(--line-strong)] text-[var(--muted)]"
             >
               <Plus className="h-5 w-5" />
+              <span className="rail-label">Plugins</span>
             </button>
           </div>
 
           {/* foot: settings + identity */}
-          <div className="flex flex-row items-center gap-1.5 md:flex-col">
+          <div className="nav-personal">
             {howMod && <RailButton mod={howMod} active={active.id === howMod.id} onClick={open} />}
             <RailButton
               mod={settingsMod}
@@ -139,8 +141,10 @@ export default function App() {
                   : `Profile: sign in to ${edition.productName}`
               }
               data-active={active.id === identityMod.id}
+              aria-current={active.id === identityMod.id ? "page" : undefined}
+              aria-label="Profile"
               data-tour={identityMod.id}
-              className="prism-hover flex h-11 w-11 items-center justify-center rounded-full border border-[var(--line-strong)] text-[var(--muted)] transition hover:text-[var(--fg)] data-[active=true]:text-[var(--fg)]"
+              className="rail-button prism-hover text-[var(--muted)] data-[active=true]:bg-[var(--raise)] data-[active=true]:text-[var(--fg)]"
             >
               {identity.signedIn ? (
                 <span className="font-tight text-sm font-semibold uppercase">
@@ -149,13 +153,14 @@ export default function App() {
               ) : (
                 <Fingerprint className="h-5 w-5" />
               )}
+              <span className="rail-label">Profile</span>
             </button>
           </div>
         </nav>
 
         {/* ── panel ── */}
-        <main className={`relative min-h-0 min-w-0 flex-1 ${colourful ? "inked" : ""}`} style={inkVars(active.id)}>
-          <active.Panel identity={identity} instance={skinnedInstance} open={open} />
+        <main className={`relative min-h-0 min-w-0 flex-1 ${colourful ? "inked" : ""} ${!edition.showcase ? "live-surface" : ""}`} style={inkVars(active.id)}>
+          <active.Panel identity={identity} instance={skinnedInstance} open={open} installed={installed} />
           <PluginFeedback
             pluginId={active.id}
             pluginTitle={active.title}
@@ -211,11 +216,14 @@ function RailButton({
       onClick={() => onClick(mod.id)}
       title={`${mod.title}${mod.lab ? " (lab)" : ""}: ${mod.tagline}`}
       data-active={active}
+      aria-current={active ? "page" : undefined}
+      aria-label={`${mod.title}${mod.lab ? " (lab)" : ""}`}
       data-tour={mod.id}
       style={inkVars(mod.id)}
-      className="prism-hover group relative flex h-11 w-11 shrink-0 items-center justify-center rounded-[var(--radius)] text-[var(--muted)] transition hover:bg-[var(--ink-wash,var(--raise))] hover:text-[var(--ink,var(--fg))] data-[active=true]:bg-[var(--ink-soft,var(--raise))] data-[active=true]:text-[var(--ink,var(--fg))]"
+      className="rail-button prism-hover group relative text-[var(--muted)] hover:bg-[var(--ink-wash,var(--raise))] hover:text-[var(--fg)] data-[active=true]:bg-[var(--ink-soft,var(--raise))] data-[active=true]:text-[var(--fg)]"
     >
       <Icon className="h-5 w-5" />
+      <span className="rail-label">{mod.title}{mod.lab ? " (lab)" : ""}</span>
       {mod.needsUpgrade && (
         <span
           className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full"
@@ -257,6 +265,12 @@ function Catalog({
   const [ask, setAsk] = useState<null | { plugin: string | null; title: string }>(null);
   const [filed, setFiled] = useState(0);
   const registry = useRegistry();
+  const dialog = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const trigger = document.querySelector<HTMLButtonElement>('[data-tour="catalog"]');
+    dialog.current?.showModal();
+    return () => trigger?.focus();
+  }, []);
   const row = (p: MurmurModule) => (
     <CatalogRow
       key={p.id}
@@ -270,8 +284,11 @@ function Catalog({
     />
   );
   return (
-    <div
-      className="fixed inset-0 z-20 flex items-center justify-center bg-black/20 p-6"
+    <dialog
+      ref={dialog}
+      aria-label="Plugins"
+      onCancel={onClose}
+      className="fixed inset-0 m-0 h-full max-h-none w-full max-w-none items-center justify-center border-0 bg-transparent p-3 text-[var(--fg)] open:flex backdrop:bg-black/25 md:p-6"
       onClick={onClose}
     >
       <div
@@ -280,7 +297,7 @@ function Catalog({
       >
         <div className="flex items-start justify-between border-b border-[var(--line)] px-6 py-4">
           <div>
-            <div className="font-tight text-lg font-medium">Plugins</div>
+            <h2 className="font-tight text-xl font-medium">Plugins</h2>
             <p className="text-xs text-[var(--muted)]">
               {access
                 ? `Who in ${edition.instance.name} can use each plugin, and how much.`
@@ -313,7 +330,8 @@ function Catalog({
           </div>
           <button
             onClick={onClose}
-            className="text-[var(--faint)] hover:text-[var(--fg)]"
+            aria-label="Close plugins"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--raise)] hover:text-[var(--fg)]"
           >
             <X className="h-5 w-5" />
           </button>
@@ -376,7 +394,7 @@ function Catalog({
         </div>
 
       </div>
-    </div>
+    </dialog>
   );
 }
 
@@ -399,20 +417,20 @@ function CatalogRow({
 }) {
   const Icon = p.icon;
   return (
-    <article className="flex items-center gap-4 rounded-[var(--radius)] border border-[var(--line)] px-4 py-3">
+    <article className="flex flex-wrap items-center gap-3 rounded-[var(--radius)] border border-[var(--line)] px-4 py-4 sm:flex-nowrap">
       <div
         style={inkVars(p.id)}
-        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius)] border border-[var(--line-strong)] [border-color:var(--ink,var(--line-strong))] bg-[var(--ink,transparent)]"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius)] border border-[var(--line-strong)] bg-[var(--ink-wash,var(--raise))]"
       >
-        <Icon className="h-5 w-5 text-[var(--ink-on,var(--muted))]" />
+        <Icon className="h-5 w-5 text-[var(--fg)]" />
       </div>
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-2">
+      <div className="min-w-[10rem] flex-1">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="font-tight text-sm font-medium">{p.title}</span>
           {p.lab && <Status>lab</Status>}
           {p.needsUpgrade && <Status tone="warn">needs the larger app</Status>}
         </div>
-        <div className="mt-0.5 truncate text-xs text-[var(--muted)]">
+        <div className="mt-1 text-xs leading-relaxed text-[var(--muted)]">
           {market ? `By ${p.by ?? "Decent"} · ${isDemo ? "priced by use" : "free"} · ` : ""}
           {p.tagline}
         </div>

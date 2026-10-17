@@ -81,6 +81,7 @@ export function SearchBox({ q, setQ }: { q: string; setQ: (q: string) => void })
     <label className="flex items-center gap-2 rounded-[var(--radius)] border border-[var(--line)] px-3 py-2 focus-within:border-[var(--fg)]">
       <Search className="h-4 w-4 shrink-0 text-[var(--faint)]" />
       <input
+        aria-label="Search plugins"
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="Search every plugin that exists"
