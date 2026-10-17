@@ -21,6 +21,7 @@ import { DemoBar, isDemo, Tour, tourSeen } from "../demo";
 import { AccessTable } from "../demo/access";
 import { LiveAccess } from "./Access";
 import { accessSupported } from "../lib/access";
+import { useReach } from "../lib/reach";
 import { TailorDialog } from "../demo/tailor";
 import { colourful, inkVars } from "../demo/ink";
 import { AskForm, AsksSection, SearchBox, SearchResults, useRegistry } from "./Asks";
@@ -59,9 +60,11 @@ export default function App() {
     [skin.name, skin.logo],
   );
 
+  // The rail shows only what this sign-in can use (lib/reach.ts); the Plugins sheet still lists everything installed.
+  const { visible } = useReach(installed, identity.session);
   const installedPlugins = useMemo(
-    () => pluginCatalog.filter((p) => installed.includes(p.id)),
-    [installed],
+    () => pluginCatalog.filter((p) => visible.includes(p.id)),
+    [visible],
   );
 
   const active = useMemo(() => {

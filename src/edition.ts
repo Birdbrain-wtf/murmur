@@ -143,7 +143,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     // set and the Journal is its reading surface (rich, 2026-10-16).
     custom: ["journal"],
     plugins: [...STARTER.filter((id) => id !== "magazine"), "pay"],
-    optional: ["swap", "exchange", "shield"],
+    optional: ["swap", "exchange", "shield", "watch"],
     privateChats: true,
     exchangeMarket: "dex.birdbrain.wtf:7232",
     // served by Birdbrain's own box, never Zo (ADR 0076, 0078)
@@ -171,7 +171,8 @@ const EDITIONS: Record<EditionId, Edition> = {
     // edition they are custom. Other editions get them as the starter set.
     custom: ["magazine", "meet"],
     plugins: ["chat", "pay", "operations", "files", "invite"],
-    optional: ["swap"],
+    // FTTF's channel, offered to add: it plays as a guest here (plugins/watch)
+    optional: ["swap", "watch"],
     home: "agent",
     ops: { base: "https://www.decent.partners", member: true },
     invite: { base: "https://www.decent.partners", update: "https://www.decent.partners/app/update" },

@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Play, X } from "lucide-react";
+import { collectives, edition } from "../../edition";
+import { joinCollective, switchCollective, joinedCollectives } from "../../host/scope";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { email } from "../../host/support";
 import { openInBrowser } from "../../identity/passkey";
@@ -22,16 +24,24 @@ import { Button, PageBody } from "../../ui";
  * The frame's "Sign in" opens the app's own sign-in here; a session the door
  * refuses signs the app out of FTTF as any other plugin would. Links that leave
  * the channel open in the member's browser, so the picture keeps playing.
+ *
+ * In any other collective's window (Birdbrain, Decent: offered there to add,
+ * 2026-10-17) the channel plays as a guest. That window's session is the other
+ * collective's, so it is never handed to FTTF's origin, and a door refusing
+ * nothing signs nobody out. The frame's "Sign in" offers FTTF's own space
+ * instead (added beside this one where the app can open it), or FTTF's site.
  */
 const ORIGIN = "https://fttf.decent.partners";
 const CHANNEL_URL = `${ORIGIN}/watch/`;
+const HOME = edition.id === "fttf";
+const canOpenFttf = collectives.some((c) => c.id === "fttf");
 
 function Panel({ identity }: PluginContext) {
   const { signIn } = useIdentity();
   const frame = useRef<HTMLIFrameElement>(null);
   const [loaded, setLoaded] = useState(false);
   const [asking, setAsking] = useState(false);
-  const session = identity.signedIn ? identity.session ?? null : null;
+  const session = HOME && identity.signedIn ? identity.session ?? null : null;
   const current = useRef(session);
   current.current = session;
 
@@ -46,7 +56,9 @@ function Panel({ identity }: PluginContext) {
       if (!m || typeof m.type !== "string") return;
       if (m.type === "fttf:ready") send();
       else if (m.type === "fttf:sign-in") setAsking(true);
-      else if (m.type === "fttf:session-rejected") sessionRejected(current.current);
+      else if (m.type === "fttf:session-rejected") {
+        if (HOME) sessionRejected(current.current);
+      }
       else if (m.type === "fttf:open" && typeof m.url === "string" && m.url.startsWith("https://")) void openInBrowser(m.url);
     }
     window.addEventListener("message", onMessage);
@@ -75,7 +87,36 @@ function Panel({ identity }: PluginContext) {
         className="h-full w-full border-0"
         style={{ opacity: loaded ? 1 : 0, transition: "opacity .4s ease" }}
       />
-      {asking && !session && (
+      {asking && !HOME && (
+        <div className="absolute inset-0 z-10 overflow-auto bg-background/95">
+          <div className="flex justify-end p-3">
+            <Button variant="quiet" icon={X} onClick={() => setAsking(false)}>
+              Back to the channel
+            </Button>
+          </div>
+          <PageBody width="read">
+            <h2 className="text-xl font-semibold">Sign in to Four To The Floor</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              You are watching as a guest from {edition.instance.name}. Four To The Floor keeps its own members and its own
+              sign-in, so joining in happens in its space, not this one.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2">
+              {canOpenFttf && (
+                <Button
+                  variant="primary"
+                  onClick={() => (joinedCollectives().includes("fttf") ? switchCollective("fttf") : joinCollective("fttf"))}
+                >
+                  {joinedCollectives().includes("fttf") ? "Open Four To The Floor" : "Add Four To The Floor"}
+                </Button>
+              )}
+              <Button variant={canOpenFttf ? "secondary" : "primary"} onClick={() => void openInBrowser(ORIGIN)}>
+                Go to their site
+              </Button>
+            </div>
+          </PageBody>
+        </div>
+      )}
+      {asking && HOME && !session && (
         <div className="absolute inset-0 z-10 overflow-auto bg-background/95">
           <div className="flex justify-end p-3">
             <Button variant="quiet" icon={X} onClick={() => setAsking(false)}>

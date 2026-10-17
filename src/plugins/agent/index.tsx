@@ -14,7 +14,8 @@ import { edition, groupWord, installs, shaped } from "../../edition";
 import { Button, Notice, Page, PageHeader, Section, Waiting } from "../../ui";
 import { getModule, pluginCatalog } from "../../host/registry";
 import { listSecrets } from "../../lib/secrets";
-import { useOps } from "../../lib/ops";
+import { signInToOps } from "../../lib/ops";
+import { useReach } from "../../lib/reach";
 import { supported as checkInsSupported, useParticipation } from "../../identity/participation";
 import { sampleAnswers, sampleFallback } from "../../demo/sample";
 
@@ -95,7 +96,6 @@ interface Step {
 
 function useSetup(identity: PluginContext["identity"], installed: string[]): Step[] {
   const { grant } = useParticipation();
-  const ops = useOps();
   const [, tick] = useState(0);
 
   // Chat sign-in, keys and invites live in other plugins; look again whenever
@@ -152,16 +152,6 @@ function useSetup(identity: PluginContext["identity"], installed: string[]): Ste
     place: "settings",
     ask: "How do I add an API key, and what are keys for?",
   });
-  if (edition.ops && has("operations")) {
-    steps.push({
-      id: "ops",
-      title: "Open Operations",
-      hint: "For people who look after the company's accounts.",
-      done: ops.kind === "ready",
-      place: "operations",
-      ask: "How do I see the company's accounts?",
-    });
-  }
   if (has("invite")) {
     steps.push({
       id: "invite",
@@ -182,7 +172,7 @@ function report(steps: Step[], installed: string[]) {
     checkIns: checkInsSupported ? (done("checkins") ? "on" : "off") : "unsupported",
     ...(installs(edition).includes("chat") ? { chat: !!done("chat") } : {}),
     keys: listSecrets().length,
-    ...(edition.ops ? { ops: done("ops") ? "paired" : "unpaired" } : {}),
+    ...(edition.ops ? { ops: installed.includes("operations") ? "paired" : "unpaired" } : {}),
     installed,
   };
 }
@@ -244,7 +234,11 @@ async function ask(
 // ── the panel ───────────────────────────────────────────────────────────────
 
 function Panel({ identity, open, installed: installedIds }: PluginContext) {
-  const installed = (installedIds ?? installs(edition)).filter((id) => !!getModule(id));
+  // Only what this sign-in can use: the console's list and the collective's grid decide (lib/reach.ts).
+  const { visible: installed, pairable } = useReach(
+    (installedIds ?? installs(edition)).filter((id) => !!getModule(id)),
+    identity.session,
+  );
   const steps = useSetup(identity, installed);
   const [thread, setThread] = useState<Turn[]>(loadThread);
   const [draft, setDraft] = useState("");
@@ -399,6 +393,14 @@ function Panel({ identity, open, installed: installedIds }: PluginContext) {
                   );
                 })}
               </div>
+              {pairable && (
+                <p className="mt-3 px-1 text-xs text-[var(--faint)]">
+                  Look after {name}'s books?{" "}
+                  <button onClick={() => void signInToOps()} className="underline underline-offset-2 hover:text-[var(--fg)]">
+                    Sign in to the company console
+                  </button>
+                </p>
+              )}
             </Section>
           </section>
         )}
