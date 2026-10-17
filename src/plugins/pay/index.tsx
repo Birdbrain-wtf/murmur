@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
+import { openInBrowser } from "../../identity/passkey";
 import {
   walletBalance,
   walletInit,
@@ -20,7 +21,9 @@ import {
   accountName,
   cardInfo,
   isCardAccount,
+  WalletVerificationError,
   type WalletAccount,
+  type WalletVerification,
   type WalletTx,
 } from "../../lib/wallet";
 import {
@@ -51,6 +54,7 @@ function Panel({ instance, identity }: PluginContext) {
   const [error, setError] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<WalletAccount[] | null>(null);
   const [creating, setCreating] = useState(false);
+  const [verification, setVerification] = useState<WalletVerification | null>(null);
 
   const [selected, setSelected] = useState<string | null>(null);
   const [txLoading, setTxLoading] = useState(false);
@@ -84,9 +88,14 @@ function Panel({ instance, identity }: PluginContext) {
     if (!a) return;
     setCreating(true);
     setError(null);
+    setVerification(null);
     try {
       setAccounts(await walletInit(base, a));
     } catch (err) {
+      if (err instanceof WalletVerificationError) {
+        setVerification(err.verification);
+        return;
+      }
       setError(err instanceof Error ? err.message : "could not create wallet");
     } finally {
       setCreating(false);
@@ -179,6 +188,35 @@ function Panel({ instance, identity }: PluginContext) {
         )}
 
         {error && <Notice tone="danger">Decent Pay: {error}</Notice>}
+
+        {verification && (
+          <Notice tone="warn">
+            {verification.url ? (
+              <>
+                Bloque, who hold the money behind Decent Pay, need you to accept their terms
+                before they open a wallet.{" "}
+                <button
+                  type="button"
+                  className="underline"
+                  onClick={() => openInBrowser(verification.url!)}
+                >
+                  Accept Bloque's terms
+                </button>
+                , then come back and press Create wallet again.
+              </>
+            ) : verification.retryable ? (
+              <>
+                Bloque, who hold the money behind Decent Pay, are still setting up your account
+                for their new checks. Nothing was created. Try again later.
+              </>
+            ) : (
+              <>
+                Bloque need more checks before they open a wallet (
+                {verification.missing.join(", ") || "verification"}). Nothing was created.
+              </>
+            )}
+          </Notice>
+        )}
 
         {phase === "ready" && accounts && accounts.length === 0 && (
           <Gate

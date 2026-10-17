@@ -36,6 +36,7 @@ import {
   type Item,
   type SimplexStatus,
 } from "../../lib/simplex";
+import { Composer } from "./conversation";
 import { httpInviteSink } from "../../lib/simplex/inviteGraph";
 import { Trust, isControl, type Pending } from "../../lib/simplex/trust";
 
@@ -464,7 +465,7 @@ function Conversation({
 
   const send = async () => {
     const t = text.trim();
-    if (!t) return;
+    if (!t || busy) return;
     if (isControl(t)) return setProblem("That line can't be sent as a message.");
     setBusy(true);
     setProblem(null);
@@ -507,22 +508,7 @@ function Conversation({
             <div ref={end} />
           </div>
         )}
-        <div className="mt-4 flex items-end gap-2">
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                void send();
-              }
-            }}
-            rows={2}
-            placeholder={`Message ${name}`}
-            className={`${inputClass} resize-y`}
-          />
-          <Button variant="primary" icon={Send} busy={busy} disabled={!text.trim()} onClick={send}>Send</Button>
-        </div>
+        <Composer value={text} onChange={setText} name={name} busy={busy} onSend={() => void send()} />
         {problem && <div className="mt-3"><Notice tone="danger">{problem}</Notice></div>}
       </Card>
     </Section>

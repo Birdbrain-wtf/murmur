@@ -88,10 +88,14 @@ export const SHIELD_NETWORKS: Record<ShieldNet, ShieldNetwork> = {
     label: "KSM",
     chainId: 420420418,
     rpcs: ["https://eth-rpc-kusama.polkadot.io/"],
-    contract: "0xDC80565357D63eCa67F3f020b6DD1CE1fD0E1Ed8",
-    pool: "v4",
+    // The pool Shield's own interface uses (Interface/src/App.tsx, 2026-09-28),
+    // deployed 2026-09-02. 0xDC80…1Ed8 is an older pool with no deposits ever,
+    // which this app read until 2026-10-17. Steps sit where its crowd already
+    // is: most deposits so far are 0.5 or 1 KSM.
+    contract: "0xC86A3B1A2EbBEc8d32949A1E75e3BafE50b5f1D4",
+    pool: "v7",
     native: { symbol: "KSM", decimals: 18 },
-    steps: ["0.1", "1", "10"],
+    steps: ["0.1", "0.5", "1"],
     explorer: (tx) => `https://assethub-kusama.subscan.io/tx/${tx}`,
   },
   polkadot: {
@@ -99,10 +103,14 @@ export const SHIELD_NETWORKS: Record<ShieldNet, ShieldNetwork> = {
     label: "DOT",
     chainId: 420420419,
     rpcs: ["https://eth-rpc.polkadot.io/"],
-    contract: "0xe55B85441Bc39532f279Cf24059f02DFbcf87051",
-    pool: "v4",
+    // The pool Shield's own interface uses, deployed 2026-07-26
+    // (FixedIlopPhase2Paseo_v7_Polkadot.sol). 0xe55B…7051 is an older pool
+    // with one deposit, which this app read until 2026-10-17. Most deposits
+    // here are 0.1, 0.5 or 1 DOT, so those are the steps.
+    contract: "0x0D694Da746e73D1e255c1894F90e38170db45809",
+    pool: "v7",
     native: { symbol: "DOT", decimals: 18 },
-    steps: ["1", "10", "100"],
+    steps: ["0.1", "0.5", "1"],
     explorer: (tx) => `https://assethub-polkadot.subscan.io/tx/${tx}`,
   },
 };
@@ -273,7 +281,7 @@ export interface Leaf {
   amount: bigint | null;
 }
 
-/** The pool as it stands. The crowd is `leaves.length`, and nothing else. */
+/** The pool as it stands. The crowd is `crowdSize(crowd)`, and nothing else. */
 export interface Crowd {
   net: ShieldNet;
   head: number;
@@ -281,6 +289,14 @@ export interface Crowd {
   leaves: Leaf[];
   /** what the pool still holds in the network's own token */
   held: bigint;
+  /**
+   * How many commitments the contract says its tree holds. Deposits made from a
+   * Substrate account through revive.call never reach eth_getLogs, so on the
+   * live pools this is larger than `leaves.length` (2026-10-17: Polkadot 176
+   * against 111 seen, Kusama 55 against 44). The crowd is this figure. A tree
+   * rebuilt from `leaves` alone will not reach the contract's root.
+   */
+  size: number | null;
   /** the root the contract itself reports */
   root: string;
   withdrawals: number;
@@ -353,6 +369,12 @@ export async function readCrowd(n: ShieldNetwork, provider?: JsonRpcProvider): P
   } catch {
     held = await p.getBalance(n.contract);
   }
+  let size: number | null = null;
+  try {
+    size = Number(await c.treeSize());
+  } catch {
+    // Older deployments do not offer it.
+  }
   let root = "0";
   try {
     root = (await c.currentRoot()).toString();
@@ -360,7 +382,7 @@ export async function readCrowd(n: ShieldNetwork, provider?: JsonRpcProvider): P
     // Some deployments do not offer the view; the tree below still has a root.
   }
 
-  return { net: n.id, head, leaves, held, root, withdrawals, lastAt, checked: false };
+  return { net: n.id, head, leaves, held, size, root, withdrawals, lastAt, checked: false };
 }
 
 /**
@@ -368,12 +390,15 @@ export async function readCrowd(n: ShieldNetwork, provider?: JsonRpcProvider): P
  * among the deposits that could have been it, so an amount nobody else has paid
  * in is a withdrawal with one candidate: the member.
  */
+/** Every commitment in the tree, counting the ones no event shows us. */
+export const crowdSize = (crowd: Crowd | null) => Math.max(crowd?.leaves.length ?? 0, crowd?.size ?? 0);
+
 export function hidingAmong(crowd: Crowd | null, amount: bigint | null): { crowd: number; sameAmount: number | null } {
   // An unread pool says nothing, which is not the same as saying nobody is there.
-  if (!crowd || amount == null) return { crowd: crowd?.leaves.length ?? 0, sameAmount: null };
+  if (!crowd || amount == null) return { crowd: crowdSize(crowd), sameAmount: null };
   const known = crowd.leaves.filter((l) => l.amount != null);
   return {
-    crowd: crowd.leaves.length,
+    crowd: crowdSize(crowd),
     sameAmount: known.length ? known.filter((l) => l.amount === amount).length : null,
   };
 }
@@ -721,6 +746,10 @@ export async function unshield(
 
     onStep({ stage: "building" });
     const crowd = await readCrowd(n, provider);
+    if (crowd.size != null && crowd.size > crowd.leaves.length)
+      throw new Error(
+        `The pool's tree holds ${crowd.size} entries and only ${crowd.leaves.length} can be read here, so a proof made now would not match it. Deposits made from a Substrate account do not show up where this app looks.`,
+      );
     const tree = await Tree.of(crowd.leaves.map((l) => l.commitment));
     const at = tree.indexOf(note.commitment);
     if (at < 0) throw new Error("This note is not in the pool's tree yet. Wait for its block to settle.");

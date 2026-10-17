@@ -1,10 +1,11 @@
-import { colourful, inkOf, onInk } from "../../demo/ink";
-import { useEffect, useRef, useState } from "react";
-import { Check, Hash, MessageSquare, Phone, Send, UserRound, Users, Video, X } from "lucide-react";
+import { inkOf, onInk } from "../../demo/ink";
+import { useRef, useState } from "react";
+import { ArrowLeft, Search, Check, Hash, MessageSquare, Phone, Send, UserRound, Users, Video, X } from "lucide-react";
 import type { PluginContext } from "../../host/types";
 import { edition, groupWord } from "../../edition";
 import { Button, Dot, Eyebrow, Notice, Page, PageHeader, inputClass } from "../../ui";
 import { sampleRooms, type SampleMessage } from "../../demo/sample";
+import { Composer, Timeline } from "./conversation";
 import { CallRoom, SCRIPTS, type CallSpec } from "../../demo/callroom";
 
 /**
@@ -30,16 +31,17 @@ export function DemoChat({ open }: PluginContext) {
   const [active, setActive] = useState(rooms[0].id);
   const [draft, setDraft] = useState("");
   const [seen, setSeen] = useState<string[]>([rooms[0].id]);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [conversation, setConversation] = useState(false);
+  const [search, setSearch] = useState("");
+  const drafts = useRef<Record<string, string>>({});
   const [now] = useState(() => Date.now());
   const room = rooms.find((r) => r.id === active)!;
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [active, room.messages.length]);
-
   function pick(id: string) {
+    drafts.current[active] = draft;
+    setDraft(drafts.current[id] ?? "");
     setActive(id);
+    setConversation(true);
     setSeen((s) => [...new Set([...s, id])]);
   }
 
@@ -52,6 +54,7 @@ export function DemoChat({ open }: PluginContext) {
     const body = draft.trim();
     if (!body) return;
     setDraft("");
+    drafts.current[active] = "";
     post(active, { from: "You", body, ago: 0 });
     const reply = active === "bob" ? "Bob" : "Carol";
     setTimeout(
@@ -96,18 +99,21 @@ export function DemoChat({ open }: PluginContext) {
         title="Chat"
         lede={`Talk to your ${groupWord}.`}
       />
-      <div className="flex min-h-0 flex-1">
-        <aside className="flex w-44 shrink-0 flex-col border-r border-[var(--line)] md:w-64">
+      <div className="chat-layout" data-conversation={conversation}>
+        <aside className="chat-sidebar" aria-label="Rooms">
           <div className="border-b border-[var(--line)] px-4 py-3 md:px-8">
             <Eyebrow icon={Hash}>rooms</Eyebrow>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto py-2">
-            {rooms.map((r) => (
+          <label className="mx-3 mt-3 flex items-center gap-2"><Search size={16} aria-hidden="true" /><input type="search" aria-label="Find a room" placeholder="Find a room" value={search} onChange={(e) => setSearch(e.target.value)} className={`${inputClass} min-w-0 flex-1`} /></label>
+          <div className="chat-room-list min-h-0 flex-1 overflow-y-auto">
+            {search && !rooms.some((r) => r.name.toLowerCase().includes(search.toLowerCase())) && <p className="px-4 py-3 text-sm text-[var(--muted)]">No rooms match your search.</p>}
+            {rooms.filter((r) => r.name.toLowerCase().includes(search.toLowerCase())).map((r) => (
               <button
                 key={r.id}
                 onClick={() => pick(r.id)}
                 data-active={r.id === active}
-                className="prism-hover flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[var(--muted)] data-[active=true]:text-[var(--fg)]"
+                aria-current={r.id === active ? "true" : undefined}
+                className="chat-room prism-hover flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[var(--muted)] data-[active=true]:text-[var(--fg)]"
               >
                 {r.id === "bob" ? (
                   <UserRound className="h-3.5 w-3.5 shrink-0 text-[var(--faint)]" />
@@ -194,63 +200,24 @@ export function DemoChat({ open }: PluginContext) {
               </div>
             </div>
           )}
-          <div className="flex items-center gap-2 border-b border-[var(--line)] px-4 py-3 md:px-8">
+          <div className="chat-room-header">
+            <span className="chat-back"><Button icon={ArrowLeft} aria-label="Back to rooms" onClick={() => setConversation(false)} /></span>
             <Hash className="h-4 w-4 text-[var(--faint)]" />
             <span className="font-tight truncate text-sm font-medium">{room.name}</span>
             <span className="ml-auto flex items-center gap-2">
-              <Button icon={Phone} onClick={() => call("voice")}>
+              <Button icon={Phone} aria-label="Voice call" onClick={() => call("voice")}>
                 <span className="hidden md:inline">Voice call</span>
               </Button>
-              <Button icon={Video} onClick={() => call("video")}>
+              <Button icon={Video} aria-label="Video call" onClick={() => call("video")}>
                 <span className="hidden md:inline">Video call</span>
               </Button>
             </span>
           </div>
-          <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-4 py-4 md:px-8">
-            <div className="flex flex-col gap-3">
-              {room.messages.map((m, i) => (
-                <div key={i} className="flex gap-3">
-                  {colourful && (
-                    <span
-                      className="font-tight mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[12px] font-medium"
-                      style={{ background: personInk(m.from), color: onInk(personInk(m.from)) }}
-                    >
-                      {(m.from === "You" ? "Alice" : m.from)[0].toUpperCase()}
-                    </span>
-                  )}
-                  <div className="flex min-w-0 flex-col">
-                  <div className="flex items-baseline gap-2">
-                    <span
-                      className="font-mono text-[11px]"
-                      style={{ color: m.from === "You" ? "var(--accent)" : "var(--faint)" }}
-                    >
-                      {m.from.toLowerCase()}
-                    </span>
-                    <span className="font-mono text-[10px] text-[var(--faint)]">
-                      {new Date(now - m.ago * 60_000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                    </span>
-                  </div>
-                  <p className="text-[14px] leading-relaxed">{m.body}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <Timeline room={room.name} messages={room.messages.map((m, i) => ({ id: `${active}-${i}`, sender: m.from, body: m.body, ts: now - m.ago * 60_000, mine: m.from === "You" }))} />
           <div className="px-4 pb-2 md:px-8">
             <Notice>Sample rooms. Alice, Bob and Carol are made up.</Notice>
           </div>
-          {/* pr-36 keeps the composer clear of the host's floating Suggest button */}
-          <form onSubmit={send} className="flex items-center gap-3 border-t border-[var(--line)] py-3 pl-4 pr-36 md:pl-8">
-            <input
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder={`Message ${room.name}`}
-              className={`${inputClass} flex-1`}
-            />
-            <Button type="submit" size="md" icon={Send} disabled={!draft.trim()}>
-              Send
-            </Button>
-          </form>
+          <Composer value={draft} onChange={setDraft} onSend={send} name={room.name} />
         </section>
       </div>
     </Page>

@@ -8,7 +8,7 @@ import type { LucideIcon } from "lucide-react";
  * always present — `identity` (who you are + your participation) and `notes`
  * (personal sensemaking). Everything else is a *plugin* the user installs over
  * time from the catalog: `understand` (Birdbrain), `chat` (Matrix), `meet`
- * (Jitsi), `contact` (email) and `network` (federation). All implement this
+ * (Jitsi), `mail` (email) and `network` (federation). All implement this
  * one interface, so the shell treats them uniformly.
  */
 interface ModuleBase {
@@ -93,6 +93,8 @@ export interface Identity {
   session?: string | null;
   /** when that session runs out, unix seconds */
   sessionExp?: number | null;
+  /** signed out because the door stopped accepting the session: the name it was for */
+  lapsedAs?: string | null;
 }
 
 /** What the host passes to each module panel. */

@@ -58,6 +58,24 @@ export interface WalletTx {
   [k: string]: unknown;
 }
 
+/** What Bloque still needs before it will hold money for this alias. */
+export interface WalletVerification {
+  level: number;
+  reason: "tos" | "verification";
+  missing: string[];
+  pending: string[];
+  /** Bloque's hosted terms page, when it would open one. */
+  url: string | null;
+  /** True when Bloque said to try again later. */
+  retryable: boolean;
+}
+
+export class WalletVerificationError extends Error {
+  constructor(message: string, readonly verification: WalletVerification) {
+    super(message);
+  }
+}
+
 async function post<T>(base: string, path: string, body: unknown): Promise<T> {
   const res = await fetch(`${base}${path}`, {
     method: "POST",
@@ -65,6 +83,12 @@ async function post<T>(base: string, path: string, body: unknown): Promise<T> {
     body: JSON.stringify(body),
   });
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+  if (data.verification) {
+    throw new WalletVerificationError(
+      (data.error as string) || "verification needed",
+      data.verification as WalletVerification,
+    );
+  }
   if (!res.ok || data.error) {
     throw new Error((data.error as string) || `wallet ${res.status}`);
   }

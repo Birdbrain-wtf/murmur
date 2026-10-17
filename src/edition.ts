@@ -94,6 +94,10 @@ export interface Edition {
    *  the collective's own host. An edition without one can search the plugins it
    *  carries, and its asks wait on its own address. */
   asks?: { base: string };
+  /** where this collective keeps who can use what (`/api/access`) and takes signed
+   *  proposals to change it: infra/services/access. Always the collective's own
+   *  host. An edition without one shows its demo grid or nothing. */
+  access?: { base: string };
   /** the company's operations console (infra/services/ops-console), which the
    *  Operations and Files plugins read; editions without one leave it out */
   /** member: the console takes this edition's own sign-in (one passkey for both), otherwise the app pairs separately. */
@@ -172,6 +176,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     ops: { base: "https://www.decent.partners", member: true },
     invite: { base: "https://www.decent.partners", update: "https://www.decent.partners/app/update" },
     asks: { base: "https://www.decent.partners" },
+    access: { base: "https://www.decent.partners" },
     privateChats: true,
     joinable: ["murmur", "fttf"],
     // Decent's members, Decent's door: passkeys made at www.decent.partners. A

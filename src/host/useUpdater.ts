@@ -41,6 +41,24 @@ const canSelfUpdate = isTauri && !isMobileWebview && app.selfUpdate;
 // version, so a failed install never claims to have updated.
 const WHATS_NEW_KEY = "murmur.whats-new.v1";
 
+// Which channel this install follows. "stable" gets a build only after it has
+// sat on "early" for the soak (lab/murmur/STABILITY.md); "early" gets every build
+// the day it ships. Sent as a header, so the address baked into the build never changes.
+const CHANNEL_KEY = "murmur.update-channel.v1";
+export type UpdateChannel = "stable" | "early";
+
+export function getUpdateChannel(): UpdateChannel {
+  try {
+    return localStorage.getItem(CHANNEL_KEY) === "early" ? "early" : "stable";
+  } catch {
+    return "stable";
+  }
+}
+
+export function setUpdateChannel(channel: UpdateChannel) {
+  localStorage.setItem(CHANNEL_KEY, channel);
+}
+
 export function useUpdater() {
   const [state, setState] = useState<UpdateState>({ status: "idle" });
   const [pending, setPending] = useState<any>(null);
@@ -50,7 +68,7 @@ export function useUpdater() {
     setState((s) => (s.status === "updated" ? s : { status: "checking" }));
     try {
       const { check } = await import("@tauri-apps/plugin-updater");
-      const update = await check();
+      const update = await check({ headers: { "X-Update-Channel": getUpdateChannel() } });
       if (update) {
         setPending(update);
         setState({ status: "available", version: update.version, notes: update.body });

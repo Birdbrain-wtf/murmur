@@ -13,7 +13,9 @@ import { openInBrowser } from "./passkey";
  * The door draws the marks, so the app and the forest use one drawing. They come
  * back as SVG text and are shown as images, never as markup.
  *
- * Server side: /app/pair/seed* in infra/services/chaos-auth (seed-claims.ts).
+ * Server side: the sign-in service's /app/pair/seed* endpoints. The claim rules and
+ * ledger are public in github.com/Birdbrain-wtf/seeds
+ * (profiles/chaos-sessions/identity-forest/scripts/seed-claims.ts).
  */
 export const supported = !!edition.signIn.claim;
 

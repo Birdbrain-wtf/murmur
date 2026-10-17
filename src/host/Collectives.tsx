@@ -18,15 +18,27 @@ function logoOf(c: Edition): string {
   return preset?.skin.logo ? logoUrl(preset.skin.logo) : "";
 }
 
-function signedInAs(c: Edition): string | null {
+function stored(c: Edition): any {
   try {
-    const id = JSON.parse(peek(c.id, app.id, "murmur.identity.v1") || "null");
-    if (!id?.signedIn || !id.session) return null;
-    if (id.sessionExp && id.sessionExp < Date.now() / 1000) return null;
-    return id.handle ?? "member";
+    return JSON.parse(peek(c.id, app.id, "murmur.identity.v1") || "null");
   } catch {
     return null;
   }
+}
+
+function signedInAs(c: Edition): string | null {
+  const id = stored(c);
+  if (!id?.signedIn || !id.session) return null;
+  if (id.sessionExp && id.sessionExp < Date.now() / 1000) return null;
+  return id.handle ?? "member";
+}
+
+/** Signed out because the door stopped accepting the session, or it ran out. */
+function lapsedAs(c: Edition): string | null {
+  const id = stored(c);
+  if (id?.lapsedAs) return id.lapsedAs;
+  if (id?.signedIn && id.sessionExp && id.sessionExp < Date.now() / 1000) return id.handle ?? "member";
+  return null;
 }
 
 export function Mark({ c, size = "md" }: { c: Edition; size?: "sm" | "md" }) {
@@ -52,17 +64,27 @@ function CollectiveList() {
         {memberOf.map((c) => {
           const here = c.id === edition.id;
           const who = signedInAs(c);
+          const lapsed = who ? null : lapsedAs(c);
+          const host = new URL(c.signIn.approve).host;
           return (
             <Row
               key={c.id}
               title={c.instance.name}
               status={
-                here ? <Status tone="ok">open</Status> : who ? <Status>signed in</Status> : <Status tone="warn">not signed in</Status>
+                here ? (
+                  <Status tone="ok">open</Status>
+                ) : who ? (
+                  <Status>signed in</Status>
+                ) : (
+                  <Status tone="warn">{lapsed ? "sign in again" : "not signed in"}</Status>
+                )
               }
               detail={
                 who
-                  ? `As ${who}, with your passkey at ${new URL(c.signIn.approve).host}.`
-                  : `Sign in with your passkey at ${new URL(c.signIn.approve).host}.`
+                  ? `As ${who}, with your passkey at ${host}.`
+                  : lapsed
+                    ? `Its sign-in for ${lapsed} has lapsed. One passkey tap at ${host} when you open it.`
+                    : `Sign in with your passkey at ${host}.`
               }
               action={
                 <>

@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
+  ArrowLeft,
+  Search,
   MessageSquare,
   Hash,
   Send,
   Settings,
   LogOut,
   Fingerprint,
-  UserRound,
   Link2,
   Phone,
   Video,
@@ -28,10 +29,14 @@ import {
   Dot,
 } from "../../ui";
 import { participate, today } from "../../identity/participation";
+import { sessionRejected } from "../../identity/session";
+import { PasskeySignIn } from "../../identity/SignIn";
+import { useIdentity } from "../../identity/useIdentity";
 import { CallStage, joinCall, leaveCall, useCallers, useRecording, type CallState } from "./call";
 import { MyRecordings } from "./recordings";
 import { DemoChat } from "./demo";
 import { PrivateChats } from "./private";
+import { Composer, Timeline } from "./conversation";
 
 /**
  * Chat plugin — Matrix.
@@ -74,6 +79,16 @@ interface EventLite {
 }
 
 const SESSION_KEY = "murmur.matrix.session.v1";
+// Unsent words in group rooms, kept on this device until sent or signed out.
+// Private chats keep theirs in memory only, so nothing private is written down.
+const DRAFTS_KEY = "murmur.matrix.drafts.v1";
+function loadDrafts(): Record<string, string> {
+  try { return JSON.parse(localStorage.getItem(DRAFTS_KEY) || "{}"); } catch { return {}; }
+}
+function saveDraft(drafts: Record<string, string>, room: string, value: string) {
+  if (value) drafts[room] = value; else delete drafts[room];
+  localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts));
+}
 
 /** A demo edition shows sample rooms until the member signs in (`./demo.tsx`). */
 function Panel(ctx: PluginContext) {
@@ -95,7 +110,7 @@ function Panel(ctx: PluginContext) {
   return <LivePanel {...ctx} switcher={switcher} />;
 }
 
-function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: ReactNode }) {
+function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNode }) {
   const [client, setClient] = useState<any>(null);
   const [phase, setPhase] = useState<"loggedout" | "connecting" | "ready">(
     "loggedout",
@@ -110,7 +125,21 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
   const [draft, setDraft] = useState("");
   const [to, setTo] = useState("");
   const [starting, setStarting] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [conversation, setConversation] = useState(false);
+  const [search, setSearch] = useState("");
+  const drafts = useRef<Record<string, string>>(loadDrafts());
+  const selectedRoom = useRef(activeRoom);
+  selectedRoom.current = activeRoom;
+  function selectRoom(id: string) {
+    setActiveRoom(id);
+    setView("chat");
+    setConversation(true);
+  }
+  useEffect(() => { setDraft(activeRoom ? drafts.current[activeRoom] ?? "" : ""); }, [activeRoom]);
+  function editDraft(value: string) {
+    if (activeRoom) saveDraft(drafts.current, activeRoom, value);
+    setDraft(value);
+  }
 
   const [view, setView] = useState<"chat" | "account">("chat");
   const [elsewhere, setElsewhere] = useState("");
@@ -125,6 +154,17 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
   callRef.current = call;
   const callers = useCallers(phase === "ready" ? client : null, activeRoom);
   const recording = useRecording(phase === "ready" ? client : null, activeRoom);
+
+  // Signing in from the gate above opens chat straight away.
+  const { signIn } = useIdentity();
+  const firstSession = useRef(identity.session);
+  useEffect(() => {
+    if (identity.session && identity.session !== firstSession.current && !localStorage.getItem(SESSION_KEY)) {
+      firstSession.current = identity.session;
+      void openWithPasskey();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [identity.session]);
 
   // Restore a persisted session on mount, or open chat with the passkey session
   // if there is none yet.
@@ -153,9 +193,6 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
-  }, [events]);
 
   async function start(creds: { baseUrl: string; accessToken: string; userId: string }) {
     setPhase("connecting");
@@ -224,6 +261,13 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
         setPhase("loggedout");
         return;
       }
+      // The door no longer accepts the app's session: the app signs out of this
+      // collective and the gate below offers the passkey in place.
+      if (r.status === 401) {
+        setPhase("loggedout");
+        sessionRejected(identity.session);
+        return;
+      }
       if (!r.ok || !j.accessToken) throw new Error(j.error || `Chat did not open (${r.status}).`);
       const session = { baseUrl: j.baseUrl, accessToken: j.accessToken, userId: j.userId };
       localStorage.setItem(SESSION_KEY, JSON.stringify(session));
@@ -270,6 +314,7 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
   // Load timeline when active room changes.
   useEffect(() => {
     if (!client || !activeRoom) return;
+    setEvents([]);
     let cancelled = false;
     let detach: (() => void) | undefined;
     (async () => {
@@ -352,7 +397,7 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
       direct[target] = [...new Set([...(direct[target] ?? []), room_id])];
       await client.setAccountData("m.direct", direct).catch(() => {});
       setTo("");
-      setActiveRoom(room_id);
+      selectRoom(room_id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not start the conversation.");
     } finally {
@@ -363,7 +408,7 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
   async function join(roomId: string) {
     try {
       await client.joinRoom(roomId);
-      setActiveRoom(roomId);
+      selectRoom(roomId);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not join the room.");
     }
@@ -373,7 +418,8 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
     e.preventDefault();
     const body = draft.trim();
     if (!body || !client || !activeRoom) return;
-    setDraft("");
+    const sentRoom = activeRoom;
+    editDraft("");
     // Show it straight away. The server's copy takes the same place when it lands.
     const txnId = client.makeTxnId();
     const me = client.getUserId();
@@ -397,8 +443,9 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
     } catch (err) {
       // Take the line back off and return the words to the box, so nothing
       // looks sent that was not.
-      setEvents((prev) => prev.filter((p) => p.txnId !== txnId));
-      setDraft((d) => d || body);
+      if (selectedRoom.current === sentRoom) setEvents((prev) => prev.filter((p) => p.txnId !== txnId));
+      saveDraft(drafts.current, sentRoom, drafts.current[sentRoom] || body);
+      if (selectedRoom.current === sentRoom) setDraft(drafts.current[sentRoom]);
       setError(err instanceof Error ? err.message : "send failed");
     }
   }
@@ -439,6 +486,8 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
       /* ignore */
     }
     localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(DRAFTS_KEY);
+    drafts.current = {};
     setClient(null);
     setRooms([]);
     setEvents([]);
@@ -465,20 +514,15 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
         {header}
         <PageBody width="read">
           {!signedIn ? (
-            <Gate
-              icon={MessageSquare}
+            <PasskeySignIn
+              onSignedIn={signIn}
               title="Sign in to chat"
-              action={
-                <Button variant="primary" size="md" icon={UserRound} onClick={() => open("identity")}>
-                  Open Profile
-                </Button>
+              lede={
+                identity.lapsedAs
+                  ? `${edition.instance.name} no longer accepts the sign-in this app held for ${identity.lapsedAs}. Sign in again and Chat opens where you left it.`
+                  : `Chat opens with your passkey. Sign in to ${edition.instance.name} and you land in the room with everyone else in your ${groupWord}.`
               }
-            >
-              <p>
-                Chat opens with your passkey. Sign in to {edition.instance.name} in Profile and you will
-                land in the room with everyone else in your {groupWord}.
-              </p>
-            </Gate>
+            />
           ) : notOpen ? (
             <Gate icon={MessageSquare} title="Chat is not open yet">
               <p>
@@ -519,11 +563,15 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
   return (
     <Page>
       {header}
-      <div className="flex min-h-0 flex-1">
-        <aside className="flex w-64 shrink-0 flex-col border-r border-[var(--line)]">
+      <div className="chat-layout" data-conversation={conversation}>
+        <aside className="chat-sidebar" aria-label="Rooms">
           <div className="border-b border-[var(--line)] px-8 py-3">
             <Eyebrow icon={Hash}>rooms</Eyebrow>
           </div>
+          <label className="mx-3 mt-3 flex items-center gap-2">
+            <Search size={16} aria-hidden="true" />
+            <input type="search" aria-label="Find a room" placeholder="Find a room" value={search} onChange={(e) => setSearch(e.target.value)} className={`${inputClass} min-w-0 flex-1`} />
+          </label>
           <form onSubmit={startDirect} className="flex items-center gap-2 border-b border-[var(--line)] px-4 py-3">
             <input
               value={to}
@@ -542,8 +590,9 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
               aria-label="Start a conversation"
             />
           </form>
-          <div className="min-h-0 flex-1 overflow-y-auto py-2">
-            {rooms.map((r) => r.invited ? (
+          <div className="chat-room-list min-h-0 flex-1 overflow-y-auto">
+            {search && !rooms.some((r) => r.name.toLowerCase().includes(search.toLowerCase())) && <p className="px-4 py-3 text-sm text-[var(--muted)]">No rooms match your search.</p>}
+            {rooms.filter((r) => r.name.toLowerCase().includes(search.toLowerCase())).map((r) => r.invited ? (
               <div key={r.id} className="flex items-center gap-2 px-4 py-2 text-sm text-[var(--muted)]">
                 <Hash className="h-3.5 w-3.5 shrink-0 text-[var(--faint)]" />
                 <span className="truncate">{r.name}</span>
@@ -554,15 +603,16 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
             ) : (
               <button
                 key={r.id}
-                onClick={() => setActiveRoom(r.id)}
+                onClick={() => selectRoom(r.id)}
+                aria-current={r.id === activeRoom ? "true" : undefined}
                 data-active={r.id === activeRoom}
-                className="prism-hover flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[var(--muted)] data-[active=true]:text-[var(--fg)]"
+                className="chat-room prism-hover flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[var(--muted)] data-[active=true]:text-[var(--fg)]"
               >
                 <Hash className="h-3.5 w-3.5 shrink-0 text-[var(--faint)]" />
                 <span className="truncate">{r.name}</span>
                 {r.unread > 0 && (
                   <span className="ml-auto">
-                    <Dot tone="live" />
+                    <span aria-label={`${r.unread} unread messages`} className="font-mono text-xs">{r.unread}</span>
                   </span>
                 )}
               </button>
@@ -573,17 +623,18 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
           </div>
           <div className="border-t border-[var(--line)] p-2">
             <button
-              onClick={() => setView(view === "account" ? "chat" : "account")}
+              onClick={() => { setView(view === "account" ? "chat" : "account"); setConversation(true); }}
               data-active={view === "account"}
               className="prism-hover flex w-full items-center gap-2 rounded-[var(--radius)] px-3 py-2 text-left text-sm text-[var(--muted)] data-[active=true]:text-[var(--fg)]"
             >
               <Settings className="h-3.5 w-3.5 shrink-0 text-[var(--faint)]" />
-              <span className="truncate">{shortSender(client?.getUserId?.() ?? "account")}</span>
+              <span className="truncate">Chat settings</span>
             </button>
           </div>
         </aside>
 
         <section className="flex min-w-0 flex-1 flex-col">
+          {view === "account" && <div className="chat-back p-3"><Button icon={ArrowLeft} onClick={() => { setConversation(false); setView("chat"); }}>Rooms</Button></div>}
           {view === "account" ? (
             <PageBody width="read">
               <Section label="account" icon={Settings} lede={<span className="font-mono">{client?.getUserId?.() ?? ""}</span>}>
@@ -622,11 +673,12 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
             </PageBody>
           ) : (
             <>
-              <div className="flex items-center gap-2 border-b border-[var(--line)] px-8 py-3">
+              <div className="chat-room-header">
+                <span className="chat-back"><Button icon={ArrowLeft} aria-label="Back to rooms" onClick={() => setConversation(false)} /></span>
                 <Hash className="h-4 w-4 text-[var(--faint)]" />
-                <span className="font-tight text-sm font-medium">{activeName}</span>
+                <span className="font-tight min-w-0 flex-1 truncate text-sm font-medium">{activeName || "Group rooms"}</span>
                 {call?.roomId !== activeRoom && activeRoom && (
-                  <span className="ml-auto flex items-center gap-2">
+                  <span className="ml-auto flex flex-wrap items-center gap-2">
                     {callers > 0 && (
                       <span className="flex items-center gap-1.5 font-mono text-[11px] text-[var(--muted)]">
                         <Dot tone="live" />
@@ -663,54 +715,13 @@ function LivePanel({ identity, open, switcher }: PluginContext & { switcher?: Re
                   </Button>
                 </div>
               )}
-              <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto px-8 py-4">
-                <div className="flex flex-col gap-3">
-                  {events.map((ev) => (
-                    <div key={ev.id} className="flex flex-col">
-                      <div className="flex items-baseline gap-2">
-                        <span
-                          className="font-mono text-[11px]"
-                          style={{ color: ev.mine ? "var(--accent)" : "var(--faint)" }}
-                        >
-                          {shortSender(ev.sender)}
-                        </span>
-                        <span className="font-mono text-[10px] text-[var(--faint)]">
-                          {new Date(ev.ts).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </span>
-                      </div>
-                      <p
-                        className="text-[14px] leading-relaxed"
-                        style={ev.pending ? { opacity: 0.55 } : undefined}
-                      >
-                        {ev.body}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <Timeline key={activeRoom} room={activeName} messages={events} />
               {error && (
                 <div className="px-8 pb-2">
                   <Notice tone="danger">{error}</Notice>
                 </div>
               )}
-              {/* pr-36 keeps the composer clear of the host's floating Suggest button */}
-              <form
-                onSubmit={send}
-                className="flex items-center gap-3 border-t border-[var(--line)] py-3 pl-8 pr-36"
-              >
-                <input
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  placeholder={activeName ? `Message ${activeName}` : "Message"}
-                  className={`${inputClass} flex-1`}
-                />
-                <Button type="submit" size="md" icon={Send} disabled={!draft.trim() || !activeRoom}>
-                  Send
-                </Button>
-              </form>
+              <Composer value={draft} onChange={editDraft} onSend={send} name={activeName} disabled={!activeRoom} />
             </>
           )}
         </section>

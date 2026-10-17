@@ -19,6 +19,8 @@ import { edition, shaped, TIERS, tierOf } from "../edition";
 import { Button, Status } from "../ui";
 import { DemoBar, isDemo, Tour, tourSeen } from "../demo";
 import { AccessTable } from "../demo/access";
+import { LiveAccess } from "./Access";
+import { accessSupported } from "../lib/access";
 import { TailorDialog } from "../demo/tailor";
 import { colourful, inkVars } from "../demo/ink";
 import { AskForm, AsksSection, SearchBox, SearchResults, useRegistry } from "./Asks";
@@ -257,7 +259,9 @@ function Catalog({
   onOpen: (id: string) => void;
   onClose: () => void;
 }) {
-  const access = isDemo && tab === "access";
+  // The demo shows a sample grid; an edition with its own access server shows the live one.
+  const hasAccess = isDemo || accessSupported;
+  const access = hasAccess && tab === "access";
   // Search every plugin that exists; anything this app lacks becomes an ask (ADR 0078).
   // The invented demos keep their own sheet: they have no collective to ask.
   const asking = !isDemo;
@@ -306,7 +310,7 @@ function Catalog({
                 pluginCatalog.some((p) => p.lab) &&
                 " Lab plugins are early and here for testing, so they may change or go away."}
             </p>
-            {isDemo && (
+            {hasAccess && (
               <div className="mt-3 flex gap-1" role="tablist">
                 {(
                   [
@@ -338,7 +342,7 @@ function Catalog({
         </div>
 
         <div className="flex flex-col gap-5 p-4">
-          {access && <AccessTable installed={installed} />}
+          {access && (isDemo ? <AccessTable installed={installed} /> : <LiveAccess installed={installed} identity={identity} />)}
           {!access && asking && ask && (
             <AskForm
               plugin={ask.plugin}

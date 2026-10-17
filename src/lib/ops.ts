@@ -31,7 +31,7 @@ export interface OpsMe {
   who: { handle: string; name: string } | null;
   brand: string;
   company: string;
-  views: { accounts?: boolean; position?: boolean; shares?: boolean; raise?: boolean; incubation?: boolean; duties?: boolean; files?: boolean; investor?: boolean };
+  views: { accounts?: boolean; position?: boolean; shares?: boolean; raise?: boolean; incubation?: boolean; duties?: boolean; connections?: boolean; files?: boolean; investor?: boolean };
 }
 
 /** member: the app's own sign-in opened the console. pair: a console-only token. */

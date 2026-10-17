@@ -46,6 +46,7 @@ import {
   connect,
   deriveNote,
   formatAmount,
+  crowdSize,
   hidingAmong,
   markSpent,
   newWords,
@@ -164,7 +165,7 @@ function CrowdSection({
   onRefresh: () => void;
   busy: boolean;
 }) {
-  const total = crowd?.leaves.length ?? 0;
+  const total = crowdSize(crowd);
   const unread = !crowd;
   const verdict = unread
     ? busy
@@ -193,7 +194,7 @@ function CrowdSection({
             <Notice tone={unread ? "idle" : total === 0 ? "danger" : total < 10 ? "warn" : "ok"}>{verdict}</Notice>
             <Facts
               items={[
-                ["deposits", unread ? "not read" : String(total)],
+                ["in the tree", unread ? "not read" : String(total)],
                 ["yours", unread ? "not read" : String(mine.length)],
                 ["pool holds", crowd ? `${formatAmount(crowd.held, n.native.decimals)} ${n.native.symbol}` : "-"],
                 ["taken out", crowd ? String(crowd.withdrawals) : "-"],
@@ -651,14 +652,14 @@ function Honest({ n, crowd }: { n: ShieldNetwork; crowd: Crowd | null }) {
       "The contract takes the address to pay out as an ordinary argument and never checks it against the proof. Anyone who sees a withdrawal before it is in a block can copy the proof, put their own address in and take the money. We found this reading the contract and it is written up for Shield's own team. Until it is answered, no real money goes near it.",
     ],
     [
-      "The pools are empty",
+      "The crowd is small",
       crowd
-        ? `This one holds ${formatAmount(crowd.held, n.native.decimals)} ${n.native.symbol} across ${crowd.leaves.length} deposits. Privacy is other people, and they are not here yet.`
-        : "Privacy is other people, and on these pools there are almost none.",
+        ? `This one holds ${formatAmount(crowd.held, n.native.decimals)} ${n.native.symbol} and has ${crowdSize(crowd)} entries in its tree. Privacy is other people, and there are not many of them yet.`
+        : "Privacy is other people, and these pools have tens of them, not thousands.",
     ],
     [
       "Nobody can be hidden from the fee",
-      "Without a relayer the account that pays in is the account that asks to take out. That link is visible to anyone reading the chain.",
+      "Without a relayer the account that pays in is the account that asks to take out. That link is visible to anyone reading the chain. Shield's own relayer is run by its team, and on Kusama its website hands the relayer the note's secret, so whoever runs it can see which deposit was yours.",
     ],
     [
       "Real money is off in code",

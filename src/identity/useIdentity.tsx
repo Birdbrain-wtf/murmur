@@ -3,12 +3,14 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import type { Identity } from "../host/types";
 import type { SignedIn } from "./passkey";
 import { revoke } from "./participation";
+import { checkSession, onSessionRejected } from "./session";
 
 const KEY = "murmur.identity.v1";
 
@@ -20,7 +22,7 @@ function load(): Identity {
     if (raw) {
       const id = JSON.parse(raw) as Identity;
       // A passkey session that has run out signs the app out; the member signs in again.
-      if (id.session && id.sessionExp && id.sessionExp < Date.now() / 1000) return SIGNED_OUT;
+      if (id.session && id.sessionExp && id.sessionExp < Date.now() / 1000) return { ...SIGNED_OUT, lapsedAs: id.handle };
       // A name typed before passkey sign-in existed proves nothing: ask again.
       if (id.signedIn && !id.session) return SIGNED_OUT;
       return id;
@@ -42,6 +44,8 @@ interface IdentityApi {
   signIn: (who: SignedIn) => void;
   signOut: () => void;
 }
+
+const MATRIX_KEY = "murmur.matrix.session.v1";
 
 const Ctx = createContext<IdentityApi | null>(null);
 
@@ -81,10 +85,33 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
   // used it. Chat's account comes back with the passkey on the next sign-in.
   const signOut = useCallback(() => {
     void revoke(identity.session);
-    localStorage.removeItem("murmur.matrix.session.v1");
+    localStorage.removeItem(MATRIX_KEY);
     setEnded(identity.session ?? undefined);
     setIdentity(SIGNED_OUT);
   }, [identity.session]);
+
+  // The door no longer accepts this session: sign out of this collective only,
+  // keeping the name so the next screen can say who to sign in again as. The
+  // check-in key and chat login go too, as on sign-out.
+  const current = useRef(identity);
+  current.current = identity;
+  const lapse = useCallback((session: string) => {
+    const prev = current.current;
+    if (prev.session !== session) return;
+    void revoke(session);
+    localStorage.removeItem(MATRIX_KEY);
+    setEnded(session);
+    setIdentity({ ...SIGNED_OUT, localId: prev.localId, lapsedAs: prev.handle });
+  }, []);
+
+  // Ask the door once when the window opens (switching collective reloads it),
+  // and listen for any plugin the door has turned away.
+  useEffect(() => {
+    const s = identity.session;
+    if (s) void checkSession(s).then((r) => r === "rejected" && lapse(s));
+    return onSessionRejected(lapse);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <Ctx.Provider value={{ identity, signIn, signOut }}>

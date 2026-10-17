@@ -4,6 +4,8 @@ import type { MurmurModule, PluginContext } from "../host/types";
 import { useIdentity } from "./useIdentity";
 import { edition, packed, shaped } from "../edition";
 import { CollectivesSection } from "../host/Collectives";
+import { AccessAndConsent } from "./access";
+import { PasskeySignIn } from "./SignIn";
 import { openInBrowser, startPairing, type Pairing, type SignedIn } from "./passkey";
 import { approve, supported as checkInsSupported, useParticipation } from "./participation";
 import { claimSeed, loadSeed, markSrc, supported as seedsSupported, withdrawClaim, type SeedState } from "./seed";
@@ -21,88 +23,6 @@ import { Activity, ProfileHero, type Kind } from "./hero";
 import { Page, PageHeader, PageBody, Section, List, Row, Status, Dot, Notice, Button, Gate, Code, Waiting, Facts, Card } from "../ui";
 
 /**
- * Sign in with a passkey, in the browser. The app shows the code it asked for,
- * opens the door's approval page, and waits for the member to say yes there.
- */
-function PasskeySignIn({ onSignedIn }: { onSignedIn: (who: SignedIn) => void }) {
-  const [pairing, setPairing] = useState<Pairing | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const live = useRef<Pairing | null>(null);
-  const site = new URL(edition.signIn.approve).host;
-
-  useEffect(() => () => live.current?.cancel(), []);
-
-  async function begin() {
-    setError(null);
-    setBusy(true);
-    try {
-      const p = await startPairing();
-      live.current = p;
-      setPairing(p);
-      await openInBrowser(p.url);
-      const who = await p.done;
-      onSignedIn(who);
-    } catch (e: any) {
-      if (e?.message !== "cancelled") setError(e?.message || "That did not work. Try again.");
-      setPairing(null);
-    } finally {
-      setBusy(false);
-      live.current = null;
-    }
-  }
-
-  function cancel() {
-    live.current?.cancel();
-    setPairing(null);
-  }
-
-  if (!pairing)
-    return (
-      <Gate
-        icon={Fingerprint}
-        title="Sign in with your passkey"
-        action={
-          <Button variant="primary" size="md" onClick={begin} busy={busy} trailing={ArrowRight}>
-            {busy ? "Opening your browser" : "Sign in with your passkey"}
-          </Button>
-        }
-      >
-        <p>
-          Your browser opens {site}. Approve with your passkey and come back signed in.
-        </p>
-        {error && <Notice tone="danger">{error}</Notice>}
-      </Gate>
-    );
-
-  return (
-    <Gate
-      icon={Fingerprint}
-      title="Approve in your browser"
-      action={
-        <>
-          <Button onClick={() => openInBrowser(pairing.url)} trailing={ArrowUpRight}>
-            Open the page again
-          </Button>
-          <Button variant="quiet" icon={X} onClick={cancel}>
-            Cancel
-          </Button>
-        </>
-      }
-    >
-      <p>
-        Check {site} shows this code, then approve with your passkey. A different code means
-        someone else started it. Don't approve.
-      </p>
-      <Code>
-        {pairing.code.slice(0, 4)}-{pairing.code.slice(4)}
-      </Code>
-      <Waiting>Waiting for you to approve</Waiting>
-    </Gate>
-  );
-}
-
-/**
  * Profile (the `identity` core surface).
  *
  * What this person is in the system, in the order the system builds it: a
@@ -113,7 +33,7 @@ function PasskeySignIn({ onSignedIn }: { onSignedIn: (who: SignedIn) => void }) 
  * the app has connected for them (chat). Nothing here is a placeholder: each
  * row reads real state, and says plainly when something isn't connected.
  */
-function Panel({ instance, open }: PluginContext) {
+function Panel({ instance, open, installed }: PluginContext) {
   const { identity, signIn, signOut } = useIdentity();
   const site = new URL(edition.signIn.approve).host;
 
@@ -129,7 +49,14 @@ function Panel({ instance, open }: PluginContext) {
           lede={`Use your passkey at ${site}. Signing in makes you a member of ${instance.name}.`}
         />
         <PageBody>
-          <PasskeySignIn onSignedIn={signIn} />
+          <PasskeySignIn
+            onSignedIn={signIn}
+            lede={
+              identity.lapsedAs
+                ? `${instance.name} no longer accepts the sign-in this app held for ${identity.lapsedAs}, so it has signed you out here. Your other collectives are not affected.`
+                : undefined
+            }
+          />
           <CollectivesSection />
         </PageBody>
       </Page>
@@ -190,6 +117,8 @@ function Panel({ instance, open }: PluginContext) {
         <CollectivesSection />
 
         {edition.ops && <OperatorRole open={open} />}
+
+        {identity.session && <AccessAndConsent session={identity.session} installed={installed ?? []} open={open} />}
 
         <Section label="Connected accounts" icon={MessageSquare}>
           <List>

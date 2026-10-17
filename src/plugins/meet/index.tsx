@@ -1,6 +1,6 @@
 import { colourful, onInk } from "../../demo/ink";
 import { useEffect, useState } from "react";
-import { Video, ArrowRight, ArrowUpRight, CalendarPlus, Radio, Sparkles, MapPin } from "lucide-react";
+import { Video, ArrowRight, CalendarPlus, Radio, Sparkles, MapPin, PhoneOff } from "lucide-react";
 import type { MurmurModule, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
 import { edition } from "../../edition";
@@ -30,11 +30,13 @@ import {
  *
  * This panel surfaces the *ritual*, not a generic room launcher: the next
  * session, a live/countdown state, and the one button that actually works —
- * the hosted passkey gateway (`/chaos/join`) that proves attendance and admits
- * you to the JWT-gated room (cs.birdbrain.wtf/chaos-sessions, the same room the
- * auto-recorder joins). A naked Jitsi link can't pass that gate, so we send the
- * user through the gateway. The sovereign target stays self-hosted Jitsi under
- * decent.partners.
+ * the JWT-gated room (cs.birdbrain.wtf/chaos-sessions, the same room the
+ * auto-recorder joins). A signed-in app trades its session for a room ticket at
+ * `<signIn.pair>/call` and the call opens right here, in the app's own window.
+ * Without a session, or before the member has accepted the live agreement, the
+ * button falls back to the hosted passkey door (`/chaos/join`) in the browser,
+ * which proves attendance and takes consent. The sovereign target stays
+ * self-hosted Jitsi under decent.partners.
  */
 
 interface ChaosSession {
@@ -393,6 +395,50 @@ const LAST_WEEK: [string, string, string][] = [
   ["✓", "#1f9d6b", "Agreed: the open studio day goes to a vote in Chat by Friday."],
 ];
 
+interface CallTicket {
+  token: string;
+  domain: string;
+  room: string;
+}
+
+async function openOutside(url: string) {
+  try {
+    const { openUrl } = await import("@tauri-apps/plugin-opener");
+    await openUrl(url);
+  } catch {
+    window.open(url, "_blank");
+  }
+}
+
+// The room, inside the app, set up the way the website's call page sets it up
+// (core/doors/instances/chaos-live.tsx): straight in, camera and microphone off
+// until the member turns them on.
+function CallView({ ticket, title, leave }: { ticket: CallTicket; title: string; leave: () => void }) {
+  const src =
+    `https://${ticket.domain}/${encodeURIComponent(ticket.room)}?jwt=${encodeURIComponent(ticket.token)}` +
+    "#config.disableDeepLinking=true&config.prejoinPageEnabled=false&config.prejoinConfig.enabled=false" +
+    "&config.startWithAudioMuted=true&config.startWithVideoMuted=true&interfaceConfig.MOBILE_APP_PROMO=false";
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--line)] px-5 py-3">
+        <div className="font-tight flex items-center gap-2 text-sm font-medium">
+          <Radio className="h-4 w-4" /> {title}
+        </div>
+        <Button variant="secondary" icon={PhoneOff} onClick={leave}>
+          Leave the call
+        </Button>
+      </div>
+      <iframe
+        title={title}
+        src={src}
+        allow="camera; microphone; display-capture; autoplay; clipboard-write; fullscreen"
+        allowFullScreen
+        className="min-h-0 w-full flex-1 border-0 bg-black"
+      />
+    </div>
+  );
+}
+
 function Panel(ctx: PluginContext) {
   if (edition.demo && edition.call && !ctx.identity.signedIn) return <DemoCall />;
   return <ChaosPanel {...ctx} />;
@@ -403,6 +449,9 @@ function ChaosPanel({ instance, identity, open }: PluginContext) {
   const { grant } = useParticipation();
   const now = useNow();
   const [record, setRecord] = useState(false);
+  const [ticket, setTicket] = useState<CallTicket | null>(null);
+  const [joining, setJoining] = useState(false);
+  const [joinNote, setJoinNote] = useState<string | null>(null);
 
   // External, hosted surfaces. These are real pages the user opens in a
   // browser, so they must resolve to a live origin even in dev (where
@@ -434,6 +483,36 @@ function ChaosPanel({ instance, identity, open }: PluginContext) {
   else state = { tone: "idle", label: "Being scheduled" };
 
   const cadence = info?.cadence ?? "Mondays 15:00 UK";
+
+  // The call's own door records attendance too. This is the app's signed
+  // check-in, the same one every plugin makes (ADR 0069).
+  async function join() {
+    void participate("meet", `meet:chaos-sessions@${today()}`);
+    setJoinNote(null);
+    if (!identity.session) return void openOutside(joinUrl);
+    setJoining(true);
+    try {
+      const r = await fetch(`${edition.signIn.pair}/call`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ session: identity.session }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (r.ok && j.jitsi?.token) return setTicket(j.jitsi as CallTicket);
+      setJoinNote(
+        j.needsConsent
+          ? "Read and accept the agreement at the door first. It opens in your browser, and next time the call opens here."
+          : "The call could not open here just now, so it opened in your browser.",
+      );
+    } catch {
+      setJoinNote("The call could not open here just now, so it opened in your browser.");
+    } finally {
+      setJoining(false);
+    }
+    void openOutside(joinUrl);
+  }
+
+  if (ticket) return <CallView ticket={ticket} title={session?.id ? `${session.id} · Chaos Sessions` : "Chaos Sessions"} leave={() => setTicket(null)} />;
 
   if (record)
     return (
@@ -474,29 +553,26 @@ function ChaosPanel({ instance, identity, open }: PluginContext) {
           </div>
 
           <div className="mt-5 flex flex-wrap items-center gap-2">
-            <a
-              href={joinUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              // The call's own door records attendance too. This is the app's signed
-              // check-in, the same one every plugin makes (ADR 0069).
-              onClick={() => void participate("meet", `meet:chaos-sessions@${today()}`)}
-              className={`${LINK} border-[var(--fg)] font-medium`}
+            <Button
+              variant="primary"
+              icon={live ? Radio : Video}
+              busy={joining}
+              onClick={() => void join()}
               data-active={live ? "true" : undefined}
             >
-              {live ? <Radio className="h-3.5 w-3.5" /> : <ArrowUpRight className="h-3.5 w-3.5" />}
               {live ? "Join the live call" : "Join the Chaos Sessions"}
-            </a>
+            </Button>
             <a href={icsUrl} className={`${LINK} border-[var(--line-strong)]`}>
               <CalendarPlus className="h-3.5 w-3.5" /> Add to calendar
             </a>
           </div>
           <p className="mt-4 text-[13px] leading-relaxed text-[var(--muted)]">
-            Your passkey shows you were there. No password.{" "}
+            {identity.session ? "The call opens right here. " : ""}Your passkey shows you were there. No password.{" "}
             {identity.handle
               ? `You'll join as ${identity.handle}.`
               : "Join under a handle, or none."}
           </p>
+          {joinNote && <p className="mt-2 text-[13px] leading-relaxed text-[var(--muted)]">{joinNote}</p>}
           {checkInsSupported && identity.signedIn && !grant && (
             <div className="mt-2">
               <Button variant="quiet" className="!px-0" onClick={() => open("identity")}>

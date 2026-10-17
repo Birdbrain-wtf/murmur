@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { SlidersHorizontal, Palette, Plus, X, Copy, Check, RotateCcw, KeyRound, Trash2, Lock, BookOpen, Info, PenLine, Fingerprint, Library, Receipt, Eye } from "lucide-react";
 import { deleteSecret, listSecrets, persistent, saveSecret, validName, type SecretMeta } from "../lib/secrets";
-import { isTauri } from "../host/useUpdater";
+import { isTauri, getUpdateChannel, setUpdateChannel, type UpdateChannel } from "../host/useUpdater";
 import { Page, PageHeader, PageBody, Section, Card, List, Row, Status, Notice, Button, Field, Facts, inputClass } from "../ui";
 import { hasLightClient, removeCopy, setKeepCopy, useChain, useNode, type NodeStatus } from "../lib/chain";
 import type { MurmurModule, PluginContext } from "../host/types";
@@ -59,20 +59,41 @@ function About() {
       .then(setVersion)
       .catch(() => setVersion(null));
   }, []);
+  const [channel, setChannel] = useState<UpdateChannel>(getUpdateChannel);
   const host = new URL(app.signIn.approve).host;
+  function choose(next: UpdateChannel) {
+    setUpdateChannel(next);
+    setChannel(next);
+  }
   return (
     <Section label="Your version" icon={Info}>
-      <Card tone="quiet">
-        <Row
-          title={`${app.productName}${version ? ` ${version}` : ""}`}
-          status={isTauri ? <Status tone="ok">desktop app</Status> : <Status tone="warn">trying it in a browser</Status>}
-          detail={
-            isTauri
-              ? `Updates come from ${host}, signed by ${app.instance.name}. A new one shows at the bottom of the window.`
-              : "The desktop app adds a locked password store, its own check of the ledger, and automatic updates."
-          }
-        />
-      </Card>
+      <List>
+          <Row
+            title={`${app.productName}${version ? ` ${version}` : ""}`}
+            status={isTauri ? <Status tone="ok">desktop app</Status> : <Status tone="warn">trying it in a browser</Status>}
+            detail={
+              isTauri
+                ? `Updates come from ${host}, signed by ${app.instance.name}. A new one shows at the bottom of the window.`
+                : "The desktop app adds a locked password store, its own check of the ledger, and automatic updates."
+            }
+          />
+          {isTauri && (
+            <Row
+              title="Early updates"
+              status={channel === "early" ? <Status tone="ok">on</Status> : <Status>off</Status>}
+              detail={
+                channel === "early"
+                  ? "You get each update the day it is made, before everyone else. If something breaks, tell us and you help everyone who updates after you."
+                  : "You get an update once it has run for a week on early installs without trouble. Turn this on to get them sooner and help test them."
+              }
+              action={
+                <Button onClick={() => choose(channel === "early" ? "stable" : "early")}>
+                  {channel === "early" ? "Turn off" : "Turn on"}
+                </Button>
+              }
+            />
+          )}
+      </List>
     </Section>
   );
 }
