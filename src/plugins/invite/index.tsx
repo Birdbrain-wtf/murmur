@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   UserPlus,
   Copy,
@@ -6,12 +6,17 @@ import {
   Link2,
   Palette,
   ChevronDown,
+  KeyRound,
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
+import { getModule } from "../../host/registry";
 import { useSkin, encodeSkin, EMPTY_SKIN } from "../../host/useSkin";
 import { edition } from "../../edition";
-import { Page, PageHeader, PageBody, Section, Card, Field, inputClass, Button } from "../../ui";
+import { approve } from "../../identity/participation";
+import { LEVELS, LEVEL_LABEL, LEVEL_LINE, accessSupported, signInvite, useAccess, type Level } from "../../lib/access";
+import { inviteIdOf } from "../../lib/simplex/inviteGraph";
+import { Page, PageHeader, PageBody, Section, Card, Field, inputClass, Button, Notice } from "../../ui";
 
 /**
  * Invite plugin: grow the collective person to person.
@@ -27,6 +32,15 @@ import { Page, PageHeader, PageBody, Section, Card, Field, inputClass, Button } 
  * Decent build, so receiving the build from a peer is exactly as safe as from the
  * central site — the central endpoint becomes one seed among many. The invite
  * is dependency-free and works offline: it's just an encoded payload + a link.
+ *
+ * Role and permissions (2026-10-18). Where the collective keeps who can use what
+ * (`edition.access`, lib/access.ts), the inviter also sets the newcomer's role and
+ * their own level on each plugin. That part of the invite is signed with the
+ * inviter's check-in key when the link is copied (session invite:<id>:<hash of
+ * role + levels>), so nobody can change it in transit. It is a proposal: when the
+ * newcomer signs in and pastes the link under Profile → Membership, the
+ * collective's server files it in the inviter's name and applies it at once only
+ * if the inviter decides at the collective's stage (its operator while incubated).
  */
 
 const INVITE_VERSION = 1;
@@ -70,6 +84,11 @@ interface InvitePayload {
    * skin travels with the invite instead of being pasted separately.
    */
   skin?: string;
+  /** the role set for them, their own level on named plugins, and the inviter's
+   *  participation key whose check-in signs both (infra/services/access) */
+  role?: string;
+  access?: Record<string, Level>;
+  grant?: string;
   ts: number;
 }
 
@@ -84,7 +103,7 @@ function encodePayload(p: InvitePayload): string {
     .replace(/=+$/, "");
 }
 
-function Panel({ instance, identity }: PluginContext) {
+function Panel({ instance, identity, installed }: PluginContext) {
   const { skin } = useSkin();
   const [spec, setSpec] = useState<Spec>({
     invitee: "",
@@ -97,6 +116,18 @@ function Panel({ instance, identity }: PluginContext) {
   const hasSkin = encodeSkin(EMPTY_SKIN) !== skinCode;
   const [carrySkin, setCarrySkin] = useState(true);
   const brandName = skin.name?.trim() || instance.name;
+  // One invite per visit: the id is a hash over the payload including ts, and the
+  // signature over the role is bound to that id, so ts must not move between renders.
+  const [ts] = useState(() => Date.now());
+
+  // Role and permissions, where the collective keeps them.
+  const { grid, me } = useAccess(accessSupported ? identity.session : null);
+  const [role, setRole] = useState<string | null>(null);
+  const [own, setOwn] = useState<Record<string, Level>>({});
+  const [signed, setSigned] = useState<{ key: string; grant: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState<{ ok: boolean; text: string; turnOn?: boolean } | null>(null);
+  const [inviteId, setInviteId] = useState<string | null>(null);
 
   // An invite lands at the collective's own door, never at the API host the app
   // happens to talk to (which may be rented). No door, no link.
@@ -116,7 +147,18 @@ function Panel({ instance, identity }: PluginContext) {
   const origin = door.base;
   const appManifest = door.update;
 
-  const payload: InvitePayload = {
+  // The role they arrive with, and their own level where it differs from that role's.
+  const defaultRole = grid?.roles.find((r) => r.default)?.id ?? "member";
+  const roleId = role ?? defaultRole;
+  const roleName = grid?.roles.find((r) => r.id === roleId)?.name ?? roleId;
+  const plugins = grid ? Object.keys(grid.plugins).filter((id) => getModule(id) && (!installed || installed.includes(id))) : [];
+  const roleLevel = (id: string): Level => grid?.plugins[id]?.[roleId] ?? "none";
+  const access: Record<string, Level> = {};
+  for (const id of plugins) if (own[id] && own[id] !== roleLevel(id)) access[id] = own[id];
+  const hasAccess = !!grid && !!identity.session && (roleId !== defaultRole || Object.keys(access).length > 0);
+  const accessKey = `${roleId}:${JSON.stringify(Object.keys(access).sort().map((k) => [k, access[k]]))}`;
+
+  const base: Omit<InvitePayload, "grant"> = {
     v: INVITE_VERSION,
     from: identity.handle,
     fromDid: identity.did,
@@ -132,8 +174,22 @@ function Panel({ instance, identity }: PluginContext) {
     ...(spec.community.trim() ? { community: spec.community.trim() } : {}),
     ...(spec.note.trim() ? { note: spec.note.trim() } : {}),
     ...(hasSkin && carrySkin ? { skin: skinCode } : {}),
-    ts: Date.now(),
+    ...(hasAccess && roleId !== defaultRole ? { role: roleId } : {}),
+    ...(hasAccess && Object.keys(access).length ? { access } : {}),
+    ts,
   };
+  // The id covers from, the collective, room, community, note and ts only (the
+  // ledger's contract), so it is known before the role is signed.
+  useEffect(() => {
+    let live = true;
+    inviteIdOf({ v: base.v, from: base.from, fromDid: base.fromDid, inst: { slug: base.inst.slug }, room: base.room ?? null, community: base.community ?? null, note: base.note ?? null, ts }).then((id) => live && setInviteId(id));
+    return () => {
+      live = false;
+    };
+  }, [base.from, base.fromDid, base.inst.slug, base.room, base.community, base.note, ts]);
+  const signatureKey = `${inviteId}:${accessKey}`;
+  const grant = hasAccess && signed?.key === signatureKey ? signed.grant : null;
+  const payload: InvitePayload = { ...base, ...(grant ? { grant } : {}) };
 
   const link = `${origin}/join#${encodePayload(payload)}`;
   const fromName = identity.handle ? ` from ${identity.handle}` : "";
@@ -160,7 +216,13 @@ The app is your own space for notes, and for shared notes you write with the peo
 1. Open this link: ${link}
 2. Download the ${edition.productName} Mac app (Apple-silicon Mac, M1 or newer) and drag it into Applications.
 3. The first time you open it, Control-click the app icon and choose Open. Apple has not notarised the app yet, so this one-time step gets you past Gatekeeper.
-4. Start writing. ${notesLine} Shared notes are end-to-end encrypted, so not even the server that syncs them can read them.${joins ? `\n5. You'll also join ${joins}.` : ""}
+4. Start writing. ${notesLine} Shared notes are end-to-end encrypted, so not even the server that syncs them can read them.${joins ? `\n5. You'll also join ${joins}.` : ""}${
+    hasAccess
+      ? `\n${joins ? 6 : 5}. Once you're signed in, open Profile → Membership and paste this link. ${identity.handle || "Whoever invited you"} set you up as ${roleName.toLowerCase()}${
+          Object.keys(access).length ? `, with your own access to ${Object.keys(access).map((id) => getModule(id)?.title ?? id).join(", ")}` : ""
+        }, and that is how it comes through.`
+      : ""
+  }
 
 Once you're in, you can invite people too. We keep a record of who invited whom.`;
 
@@ -168,12 +230,49 @@ Once you're in, you can invite people too. We keep a record of who invited whom.
     setSpec((s) => ({ ...s, [k]: v }));
   }
 
+  /** Sign the role and levels with the check-in key, so the link carries the inviter's signature over them. */
+  async function sign(): Promise<string | null> {
+    if (!inviteId) return null;
+    const r = await signInvite(inviteId, roleId, access);
+    if (!r.ok) {
+      setNotice({ ok: false, text: r.error, turnOn: r.needsCheckIns });
+      return null;
+    }
+    setSigned({ key: signatureKey, grant: r.grant });
+    setNotice(null);
+    return r.grant;
+  }
+
   async function copy(which: "msg" | "link") {
-    await navigator.clipboard.writeText(which === "msg" ? message : link);
+    let text = which === "msg" ? message : link;
+    if (hasAccess && !grant) {
+      setBusy(true);
+      const g = await sign();
+      setBusy(false);
+      if (!g) return;
+      // The link just changed: it now carries the signature's key id.
+      const signedLink = `${origin}/join#${encodePayload({ ...base, grant: g })}`;
+      text = which === "msg" ? message.replace(link, signedLink) : signedLink;
+    }
+    await navigator.clipboard.writeText(text);
     // Lets the setup list in the app's own agent tick "invite someone" off.
     localStorage.setItem("murmur.invited.v1", new Date().toISOString());
     setCopied(which);
     setTimeout(() => setCopied(null), 1600);
+  }
+
+  async function turnOn(which: "msg" | "link") {
+    if (!identity.session) return;
+    setBusy(true);
+    try {
+      await approve(identity.session);
+      setNotice(null);
+      await copy(which);
+    } catch (e: any) {
+      setNotice({ ok: false, text: e?.message || "That did not work." });
+    } finally {
+      setBusy(false);
+    }
   }
 
   const server = (() => {
@@ -279,11 +378,92 @@ Once you're in, you can invite people too. We keep a record of who invited whom.
             </button>
           )}
 
+          {accessSupported && (
+            <Section
+              label="what they can do"
+              icon={KeyRound}
+              lede={
+                !identity.session
+                  ? `Sign in to set their role and what they can use in ${instance.name}.`
+                  : !grid
+                    ? `Reading ${instance.name}'s roles.`
+                    : me?.approver
+                      ? `Their role, and their own level on each plugin where it should differ. You decide changes in ${instance.name}, so this takes effect when they sign in and paste the invite.`
+                      : `Their role, and their own level on each plugin where it should differ. ${grid.approvers} decides it when they arrive; until then they're a member.`
+              }
+            >
+              {identity.session && grid && (
+                <div className="flex flex-col gap-4">
+                  <Field label="Role" hint={grid.roles.find((r) => r.id === roleId)?.line}>
+                    <select aria-label="Role" value={roleId} onChange={(e) => setRole(e.target.value)} className={inputClass + " w-auto"}>
+                      {grid.roles
+                        .filter((r) => r.id !== "operator")
+                        .map((r) => (
+                          <option key={r.id} value={r.id}>
+                            {r.name}
+                          </option>
+                        ))}
+                    </select>
+                  </Field>
+                  <ul className="flex flex-col divide-y divide-[var(--line)] rounded-[var(--radius)] border border-[var(--line)]">
+                    {plugins.map((id) => {
+                      const level = own[id] ?? roleLevel(id);
+                      return (
+                        <li key={id} className="flex flex-wrap items-center gap-x-4 gap-y-2 px-3 py-2 text-[13px]">
+                          <span className="min-w-28 font-medium">{getModule(id)!.title}</span>
+                          <span className="flex flex-wrap gap-1">
+                            {LEVELS.map((l) => (
+                              <button
+                                key={l}
+                                type="button"
+                                aria-pressed={level === l}
+                                title={LEVEL_LINE[l]}
+                                onClick={() =>
+                                  setOwn((o) => {
+                                    const next = { ...o, [id]: l };
+                                    if (l === roleLevel(id)) delete next[id];
+                                    return next;
+                                  })
+                                }
+                                className="prism-hover rounded-[var(--radius)] border border-[var(--line)] px-2 py-0.5 text-[12px] aria-pressed:border-[var(--fg)] aria-pressed:font-medium"
+                              >
+                                {LEVEL_LABEL[l]}
+                              </button>
+                            ))}
+                          </span>
+                          {access[id] && <span className="text-[11px] text-[var(--faint)]">their own, not {roleName.toLowerCase()}'s</span>}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <p className="text-[12px] leading-relaxed text-[var(--faint)]">
+                    {hasAccess
+                      ? `Signed with your check-in key when you copy, so nobody can change it on the way. Operations and Files keep their own list, and the other plugins don't check levels yet.`
+                      : `Leave it as it is and they arrive as ${roleName.toLowerCase()}, like everyone who signs in.`}
+                  </p>
+                </div>
+              )}
+            </Section>
+          )}
+
+          {notice && (
+            <Notice tone={notice.ok ? "ok" : "danger"}>
+              <span className="flex flex-wrap items-center gap-3">
+                {notice.text}
+                {notice.turnOn && (
+                  <Button variant="primary" busy={busy} onClick={() => void turnOn("msg")}>
+                    Turn on check-ins and copy
+                  </Button>
+                )}
+              </span>
+            </Notice>
+          )}
+
           <div className="flex flex-wrap items-center gap-2 pt-1">
-            <Button variant="primary" size="md" icon={copied === "msg" ? Check : UserPlus} onClick={() => copy("msg")}>
+            <Button variant="primary" size="md" icon={copied === "msg" ? Check : UserPlus} busy={busy} onClick={() => copy("msg")}>
               {copied === "msg" ? "Copied" : "Copy invite"}
             </Button>
-            <Button size="md" icon={copied === "link" ? Check : Link2} onClick={() => copy("link")}>
+            <Button size="md" icon={copied === "link" ? Check : Link2} busy={busy} onClick={() => copy("link")}>
               {copied === "link" ? "Copied" : "Copy link"}
             </Button>
           </div>

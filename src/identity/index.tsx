@@ -10,6 +10,7 @@ import { openInBrowser, startPairing, type Pairing, type SignedIn } from "./pass
 import { approve, supported as checkInsSupported, useParticipation } from "./participation";
 import { claimSeed, loadSeed, markSrc, supported as seedsSupported, withdrawClaim, type SeedState } from "./seed";
 import { signInToOps, signOutOfOps, useOps } from "../lib/ops";
+import { claimInvite, type ClaimOutcome } from "../lib/access";
 import { askForLogins, askLabel } from "../demo/note";
 import { labelOf, levelFor, sampleRole } from "../demo/access";
 import { samplePublication } from "../demo/sample";
@@ -109,6 +110,7 @@ function Panel({ instance, open, installed }: PluginContext) {
                 detail={`${instance.name} doesn't record check-ins yet. Calls and chat work as normal.`}
               />
             )}
+            {edition.invite && identity.session && <YourInvite session={identity.session} />}
           </List>
         </Section>
 
@@ -713,6 +715,60 @@ function CheckIns({ session }: { session: string | null }) {
             </li>
           ))}
         </ul>
+      )}
+    </div>
+  );
+}
+
+/** Arrived through someone's invite: paste the link so the collective records who brought you in, and anything they set up for you comes through. */
+function YourInvite({ session }: { session: string }) {
+  const [link, setLink] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<{ tone: "ok" | "idle" | "danger"; text: string } | null>(null);
+  const name = edition.instance.name;
+
+  const line = (from: string | null, a: ClaimOutcome | null): { tone: "ok" | "idle" | "danger"; text: string } => {
+    const who = from ? `${from}'s` : "the";
+    if (!a || a.status === "none") return { tone: "ok", text: `Recorded. ${name} knows ${from || "who"} brought you in.` };
+    if (a.status === "applied") return { tone: "ok", text: `Done: ${a.what.replace(/^Bring \S+ in as /, "you're in as ")}.` };
+    if (a.status === "proposed") return { tone: "idle", text: `Recorded. What ${from || "they"} set up for you is proposed, and ${a.approvers} decides it. Until then you're a member.` };
+    if (a.status === "already") return { tone: a.outcome === "declined" ? "danger" : "ok", text: a.outcome === "approved" ? "Already done: that invite was used before." : a.outcome === "declined" ? "That was declined, so you're a member." : `Already recorded, and ${who} proposal is still waiting.` };
+    return { tone: "danger", text: a.reason };
+  };
+
+  async function go() {
+    setBusy(true);
+    setDone(null);
+    const r = await claimInvite(link, session);
+    setBusy(false);
+    if (!r.ok) return setDone({ tone: "danger", text: r.error });
+    setDone(line(r.from, r.access));
+    setLink("");
+  }
+
+  return (
+    <div>
+      <Row
+        title="Arrived with an invite?"
+        detail={`Paste the link you were sent. It records who brought you in, and brings through anything they set up for you, such as your role.`}
+      />
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <input
+          aria-label="Your invite link"
+          value={link}
+          onChange={(e) => setLink(e.target.value)}
+          placeholder={`${edition.invite?.base}/join#…`}
+          spellCheck={false}
+          className="min-w-0 flex-1 rounded-[var(--radius)] border border-[var(--line-strong)] bg-[var(--card)] px-3 py-2 font-mono text-[12px]"
+        />
+        <Button variant="primary" busy={busy} disabled={!link.includes("#")} onClick={go}>
+          Use it
+        </Button>
+      </div>
+      {done && (
+        <div className="mt-3">
+          <Notice tone={done.tone}>{done.text}</Notice>
+        </div>
       )}
     </div>
   );

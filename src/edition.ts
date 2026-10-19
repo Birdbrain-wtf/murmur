@@ -98,6 +98,10 @@ export interface Edition {
    *  proposals to change it: infra/services/access. Always the collective's own
    *  host. An edition without one shows its demo grid or nothing. */
   access?: { base: string };
+  /** where a member can share one note with this collective, by choice, signed
+   *  with their check-in key (`/api/notes/share`): infra/services/notes-share.
+   *  Notes stay on the device without it, and with it until the member shares. */
+  share?: { base: string; name: string };
   /** the company's operations console (infra/services/ops-console), which the
    *  Operations and Files plugins read; editions without one leave it out */
   /** member: the console takes this edition's own sign-in (one passkey for both), otherwise the app pairs separately. */
@@ -106,6 +110,10 @@ export interface Edition {
    *  collective's own relay; src/plugins/chat/private.tsx). Only for an edition whose
    *  bundle id has a relay in src-tauri/src/simplex.rs (`home_for`). */
   privateChats?: boolean;
+  /** the call recorder's Matrix account on this collective's chat server
+   *  (infra/services/call-recorder). One-to-one calls offer recording only where
+   *  it is set, and the recorder is invited into the room only once both people agree. */
+  callRecorder?: string;
   /** the other collectives a member of this app can add beside its own, each
    *  opening in its own space with its own skin, plugins and sign-in */
   joinable?: EditionId[];
@@ -165,8 +173,11 @@ const EDITIONS: Record<EditionId, Edition> = {
     origin: "https://rw.zo.space",
     defaultSkin: "",
     selfUpdate: true,
-    vaultSync: true,
-    vaultName: "the Decent vault",
+    // Notes stay on the member's device. One note reaches Decent's vault only
+    // when they press Share on it, and they can withdraw it again.
+    vaultSync: false,
+    vaultName: "this device",
+    share: { base: "https://www.decent.partners", name: "Decent" },
     // Decent Magazine and Chaos Sessions are Decent's own rituals, so in its own
     // edition they are custom. Other editions get them as the starter set.
     custom: ["magazine", "meet"],
@@ -179,6 +190,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     asks: { base: "https://www.decent.partners" },
     access: { base: "https://www.decent.partners" },
     privateChats: true,
+    callRecorder: "@decent_recorder:decent.partners",
     joinable: ["murmur", "fttf"],
     // Decent's members, Decent's door: passkeys made at www.decent.partners. A
     // passkey belongs to the host that made it, so this is never Birdbrain's door.
@@ -202,9 +214,13 @@ const EDITIONS: Record<EditionId, Edition> = {
 function tailor(e: Edition, s: Shape) {
   e.productName = s.name;
   e.instance = { ...e.instance, name: s.name };
-  e.custom = s.plugins.filter((p) => p.startsWith("made-"));
+  // What was made for the group comes first; the edition's own custom plugins (the
+  // ones its real edition carries, FTTF's Watch) stay and follow it (2026-10-18).
+  const made = s.plugins.filter((p) => p.startsWith("made-"));
+  const own = (e.custom ?? []).filter((p) => !made.includes(p));
+  e.custom = [...made, ...own];
   e.plugins = s.plugins.filter((p) => !p.startsWith("made-"));
-  e.rail = ["agent", ...s.plugins];
+  e.rail = ["agent", ...made, ...own, ...e.plugins];
   e.call = { name: s.call.name, cadence: s.call.cadence, weekday: s.call.weekday, hour: s.call.hour, line: s.call.line };
   e.home = "agent";
 }

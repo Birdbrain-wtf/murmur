@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { Mic, MicOff, Video, VideoOff, PhoneOff, Circle, Square } from "lucide-react";
+import { Mic, MicOff, Video, VideoOff, PhoneOff, Circle, Square, Check, X } from "lucide-react";
 import type { Participant, Room as LiveRoom, RemoteTrack } from "livekit-client";
+import { edition } from "../../edition";
 import { Button, Notice } from "../../ui";
+import { AUTO_EVENT, type AutoRecord } from "./autorecord";
 
 /**
  * Voice and video calls in a chat room, over MatrixRTC.
@@ -39,27 +41,42 @@ export interface CallState {
  */
 export const RECORDING_EVENT = "partners.decent.call.recording";
 const PROJECT_EVENT = "partners.decent.project";
+/**
+ * One-to-one calls record only when both people say yes (rich 2026-10-18). Each
+ * person's answer is a state event keyed by their own Matrix address, which the
+ * server lets only that person write, so nobody can agree on someone else's
+ * behalf. An ask is a fresh nonce: agreeing to one call's recording is not
+ * agreeing to the next. When everyone in the call has agreed to the same ask,
+ * either app invites the recorder into the room (it is not there before) and
+ * turns the switch on; the recorder checks the answers itself and stops the
+ * moment anyone in the call takes theirs back.
+ */
+export const CONSENT_EVENT = "partners.decent.call.consent";
+const ASK_FOR_MS = 2 * 60 * 60 * 1000;
 
 export interface Recording {
   offered: boolean;
   active: boolean;
   /** who last switched it, as a Matrix address */
   by: string | null;
+  /** everyone in the call must agree first (one-to-one rooms) */
+  mutual: boolean;
 }
 
-function readRecording(client: any, roomId: string): Recording {
+function readRecording(client: any, roomId: string, direct: boolean): Recording {
   const st = client?.getRoom?.(roomId)?.currentState;
   const project = st?.getStateEvents?.(PROJECT_EVENT, "");
   const rec = st?.getStateEvents?.(RECORDING_EVENT, "");
   const c = rec?.getContent?.() ?? {};
-  return { offered: !!project, active: !!c.active, by: rec?.getSender?.() ?? null };
+  const mutual = !project && direct && !!edition.callRecorder;
+  return { offered: !!project || mutual, active: !!c.active, by: rec?.getSender?.() ?? null, mutual };
 }
 
-export function useRecording(client: any, roomId: string | null): Recording {
-  const [r, setR] = useState<Recording>({ offered: false, active: false, by: null });
+export function useRecording(client: any, roomId: string | null, direct = false): Recording {
+  const [r, setR] = useState<Recording>({ offered: false, active: false, by: null, mutual: false });
   useEffect(() => {
     if (!client || !roomId) return;
-    const read = () => setR(readRecording(client, roomId));
+    const read = () => setR(readRecording(client, roomId, direct));
     read();
     const onState = (ev: any) => {
       if (ev?.getRoomId?.() !== roomId) return;
@@ -70,8 +87,83 @@ export function useRecording(client: any, roomId: string | null): Recording {
     return () => {
       client.off("RoomState.events", onState);
     };
-  }, [client, roomId]);
+  }, [client, roomId, direct]);
   return r;
+}
+
+export interface Consent {
+  /** the current ask, if anyone asked in the last two hours */
+  ask: string | null;
+  askedBy: string | null;
+  agreed: string[];
+  declined: string[];
+}
+
+function readConsent(client: any, roomId: string): Consent {
+  const evs: any[] = client?.getRoom?.(roomId)?.currentState?.getStateEvents?.(CONSENT_EVENT) ?? [];
+  const fresh = evs
+    .map((e) => ({ who: e.getStateKey(), sender: e.getSender(), c: e.getContent?.() ?? {} }))
+    .filter((x) => x.who === x.sender && x.c.ask && Date.now() - (x.c.ts ?? 0) < ASK_FOR_MS);
+  const latest = fresh.filter((x) => x.c.asked).sort((a, b) => b.c.ts - a.c.ts)[0];
+  if (!latest) return { ask: null, askedBy: null, agreed: [], declined: [] };
+  const same = fresh.filter((x) => x.c.ask === latest.c.ask);
+  return {
+    ask: latest.c.ask,
+    askedBy: latest.who,
+    agreed: same.filter((x) => x.c.agreed).map((x) => x.who),
+    declined: same.filter((x) => !x.c.agreed).map((x) => x.who),
+  };
+}
+
+export function useConsent(client: any, roomId: string | null): Consent {
+  const empty: Consent = { ask: null, askedBy: null, agreed: [], declined: [] };
+  const [c, setC] = useState<Consent>(empty);
+  useEffect(() => {
+    if (!client || !roomId) return;
+    const read = () => setC(readConsent(client, roomId));
+    read();
+    const onState = (ev: any) => {
+      if (ev?.getRoomId?.() === roomId && ev.getType?.() === CONSENT_EVENT) read();
+    };
+    client.on("RoomState.events", onState);
+    return () => {
+      client.off("RoomState.events", onState);
+    };
+  }, [client, roomId]);
+  return c;
+}
+
+async function answer(client: any, call: CallState, ask: string, agreed: boolean, asked = false) {
+  await client.sendStateEvent(
+    call.roomId,
+    CONSENT_EVENT,
+    { ask, agreed, asked, lk_room: call.live.name, ts: Date.now() },
+    client.getUserId(),
+  );
+}
+
+/** Take back this account's yes, if it gave one. Leaving a call does this. */
+async function withdrawConsent(client: any, call: CallState) {
+  const me = client?.getUserId?.();
+  const c = readConsent(client, call.roomId);
+  if (c.ask && c.agreed.includes(me)) await answer(client, call, c.ask, false).catch(() => {});
+}
+
+/** Everyone has said yes: bring the recorder in and switch on. */
+async function startMutual(client: any, call: CallState, ask: string) {
+  const recorder = edition.callRecorder;
+  if (!recorder) throw new Error("This collective has no call recorder.");
+  const room = client.getRoom(call.roomId);
+  const pl = room?.currentState?.getStateEvents?.("m.room.power_levels", "")?.getContent?.() ?? {};
+  // The recorder resets the switch when the call ends, so it may set it.
+  if (pl.events?.[RECORDING_EVENT] !== 0) {
+    await client
+      .sendStateEvent(call.roomId, "m.room.power_levels", { ...pl, events: { ...(pl.events ?? {}), [RECORDING_EVENT]: 0 } }, "")
+      .catch(() => {});
+  }
+  const there = room?.getMember?.(recorder)?.membership;
+  if (there !== "join" && there !== "invite") await client.invite(call.roomId, recorder);
+  await client.sendStateEvent(call.roomId, RECORDING_EVENT, { active: true, lk_room: call.live.name, ask }, "");
 }
 
 export async function setRecording(client: any, call: CallState, active: boolean): Promise<void> {
@@ -152,12 +244,16 @@ export async function joinCall(client: any, roomId: string, video: boolean): Pro
   // A refused microphone or camera leaves you in the call, listening. Joining a
   // call that is already recording leaves the microphone off: turning it on is
   // the choice to be in the recording.
-  if (!readRecording(client, roomId).active) await live.localParticipant.setMicrophoneEnabled(true).catch(() => {});
+  // A room that records every call keeps only the voices of people who said yes, so there
+  // the microphone starts on as usual.
+  const autoOn = !!client.getRoom?.(roomId)?.currentState?.getStateEvents?.(AUTO_EVENT, "")?.getContent?.()?.on;
+  if (autoOn || !readRecording(client, roomId, false).active) await live.localParticipant.setMicrophoneEnabled(true).catch(() => {});
   if (video) await live.localParticipant.setCameraEnabled(true).catch(() => {});
   return { roomId, live, video };
 }
 
 export async function leaveCall(client: any, call: CallState): Promise<void> {
+  await withdrawConsent(client, call);
   try {
     await call.live.disconnect();
   } catch {
@@ -173,15 +269,22 @@ export function CallStage({
   name,
   onLeave,
   client,
+  direct = false,
+  auto,
 }: {
   call: CallState;
   name: (identity: string) => string;
   onLeave: () => void;
   client: any;
+  /** a one-to-one room: recording needs everyone's yes */
+  direct?: boolean;
+  /** the room records every call by itself; the strip above says who is in */
+  auto?: AutoRecord;
 }) {
   const [, setTick] = useState(0);
   const [problem, setProblem] = useState<string | null>(null);
-  const recording = useRecording(client, call.roomId);
+  const recording = useRecording(client, call.roomId, direct);
+  const consent = useConsent(recording.mutual ? client : null, call.roomId);
   // A relay identity is "@user:server:device"; the room knows the person's name.
   const nameOf = (id: string) =>
     client?.getRoom?.(call.roomId)?.getMember?.(id.split(":").slice(0, 2).join(":"))?.name ?? name(id);
@@ -232,6 +335,26 @@ export function CallStage({
 
   const me = live.localParticipant;
   const people: Participant[] = [me, ...live.remoteParticipants.values()];
+  const myId: string = client?.getUserId?.() ?? "";
+  // A relay identity is "@user:server:device"; consent is per person.
+  const inCall = [...new Set(people.map((p) => (p === me ? myId : p.identity.split(":").slice(0, 2).join(":"))))];
+  const others = inCall.filter((id) => id !== myId);
+  const everyoneAgreed =
+    recording.mutual && !!consent.ask && inCall.length >= 2 && inCall.every((id) => consent.agreed.includes(id));
+  const askedOfMe = recording.mutual && !!consent.ask && consent.askedBy !== myId && !consent.agreed.includes(myId) && !consent.declined.includes(myId);
+  const waitingOn = recording.mutual && consent.ask && consent.agreed.includes(myId) ? others.filter((id) => !consent.agreed.includes(id)) : [];
+  const saidNo = recording.mutual && consent.ask ? consent.declined.filter((id) => id !== myId) : [];
+
+  // Whoever's app sees the last yes first switches it on; the second does nothing.
+  const starting = useRef<string | null>(null);
+  useEffect(() => {
+    if (!everyoneAgreed || recording.active || !consent.ask || starting.current === consent.ask) return;
+    starting.current = consent.ask;
+    void startMutual(client, call, consent.ask).catch(() => {
+      starting.current = null;
+      setProblem("You both agreed, but the recording did not start. Try asking again.");
+    });
+  }, [everyoneAgreed, recording.active, consent.ask, client, call]);
 
   async function toggle(kind: "mic" | "camera") {
     setProblem(null);
@@ -252,10 +375,30 @@ export function CallStage({
     setProblem(null);
     setSwitching(true);
     try {
-      await setRecording(client, call, active);
+      if (recording.mutual) {
+        // Asking is saying yes yourself; stopping is taking your yes back.
+        if (active) await answer(client, call, crypto.randomUUID(), true, true);
+        else {
+          await withdrawConsent(client, call);
+          await setRecording(client, call, false);
+        }
+      } else await setRecording(client, call, active);
       setAsking(false);
     } catch {
       setProblem(active ? "The recording did not start. Try again in a moment." : "The recording did not stop. Try again now.");
+    } finally {
+      setSwitching(false);
+    }
+  }
+
+  async function reply(agreed: boolean) {
+    if (!consent.ask) return;
+    setProblem(null);
+    setSwitching(true);
+    try {
+      await answer(client, call, consent.ask, agreed);
+    } catch {
+      setProblem("Your answer did not go. Try again.");
     } finally {
       setSwitching(false);
     }
@@ -272,19 +415,77 @@ export function CallStage({
           <Circle className="h-3 w-3 fill-current" />
           <span className="font-medium">Recording</span>
           <span className="text-[var(--muted)]">
-            {recording.by ? `Started by ${nameOf(recording.by)}. ` : ""}Each voice is kept as its own file and transcribed.
+            {recording.mutual
+              ? "You both agreed. Each voice is kept as its own file and transcribed, and either of you can stop it."
+              : `${recording.by ? `Started by ${nameOf(recording.by)}. ` : ""}Each voice is kept as its own file and transcribed.`}
           </span>
           <Button variant="danger" icon={Square} busy={switching} onClick={() => void flip(false)} className="ml-auto">
             Stop recording
           </Button>
         </div>
       )}
-      {recording.active && !me.isMicrophoneEnabled && (
+      {recording.active && auto?.on && auto.agreed && !auto.agreed.includes(myId) && (
+        <Notice tone="warn">This call is recording, but not your voice, because you have not said yes. Press Record me above to be included.</Notice>
+      )}
+      {recording.active && !auto?.on && !me.isMicrophoneEnabled && (
         <Notice tone="warn">
           Your microphone is off because this call is being recorded. Turn it on when you are happy to be in the recording.
         </Notice>
       )}
-      {asking && !recording.active && (
+      {askedOfMe && !recording.active && (
+        <div role="alert" className="mb-3 rounded-[var(--radius)] border border-[var(--line-strong)] px-4 py-3 text-[13px] leading-relaxed">
+          <p className="font-medium">{nameOf(consent.askedBy ?? "")} would like to record this call</p>
+          <p className="mt-1 text-[var(--muted)]">
+            Nothing is recorded unless you both say yes, and either of you can stop it at any time. Each voice is kept as
+            its own file and transcribed, and filed in {edition.instance.name}'s private record under each of your names.
+            It is not used to train any model. Your voice stays yours: you can take a copy of it, or have your voice and
+            your words deleted, whenever you like.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <Button variant="primary" icon={Check} busy={switching} onClick={() => void reply(true)}>
+              Yes, record
+            </Button>
+            <Button variant="quiet" icon={X} onClick={() => void reply(false)}>
+              No thanks
+            </Button>
+          </div>
+        </div>
+      )}
+      {waitingOn.length > 0 && !recording.active && (
+        <Notice tone="warn">
+          Waiting for {waitingOn.map(nameOf).join(" and ")} to agree. Nothing is recorded until they do.{" "}
+          <button className="underline" onClick={() => void flip(false)}>
+            Cancel
+          </button>
+        </Notice>
+      )}
+      {saidNo.length > 0 && !recording.active && waitingOn.length === 0 && (
+        <Notice tone="warn">{saidNo.map(nameOf).join(" and ")} said no to recording, so this call is not recorded.</Notice>
+      )}
+      {asking && !recording.active && recording.mutual && (
+        <div className="mb-3 rounded-[var(--radius)] border border-[var(--line-strong)] px-4 py-3 text-[13px] leading-relaxed">
+          <p className="font-medium">Ask to record this call?</p>
+          <p className="mt-1 text-[var(--muted)]">
+            {others.length ? others.map(nameOf).join(" and ") : "The other person"} will be asked first. Nothing is
+            recorded unless you both say yes, and either of you can stop it at any time. Each voice is kept as its own
+            file and transcribed, and filed in {edition.instance.name}'s private record under each of your names. It is
+            not used to train any model.
+          </p>
+          <p className="mt-1 text-[var(--muted)]">
+            Your voice stays yours. You can take a copy of your recordings with you at any time, and you can have your
+            voice and your words deleted from ours.
+          </p>
+          <div className="mt-3 flex gap-2">
+            <Button variant="primary" icon={Circle} busy={switching} disabled={!others.length} onClick={() => void flip(true)}>
+              Ask
+            </Button>
+            <Button variant="quiet" onClick={() => setAsking(false)}>
+              Not now
+            </Button>
+          </div>
+        </div>
+      )}
+      {asking && !recording.active && !recording.mutual && (
         <div className="mb-3 rounded-[var(--radius)] border border-[var(--line-strong)] px-4 py-3 text-[13px] leading-relaxed">
           <p className="font-medium">Record this call?</p>
           <p className="mt-1 text-[var(--muted)]">
@@ -326,7 +527,7 @@ export function CallStage({
         >
           {me.isCameraEnabled ? "Camera off" : "Camera on"}
         </Button>
-        {recording.offered && !recording.active && !asking && (
+        {recording.offered && !auto?.on && !recording.active && !asking && !askedOfMe && waitingOn.length === 0 && (
           <Button icon={Circle} onClick={() => setAsking(true)}>
             Record
           </Button>

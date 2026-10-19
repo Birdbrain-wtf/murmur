@@ -41,6 +41,8 @@ export type MyAccess = {
   name: string;
   roles: string[];
   levels: Record<string, Level>;
+  /** plugins where a level was set for you on your invite, which wins over your roles */
+  own?: string[];
   approver: boolean;
   people: { userId: string; roles: string[] }[] | null;
   proposals: Proposal[] | null;
@@ -108,10 +110,74 @@ export type Draft =
 
 const b64u = (buf: ArrayBuffer) =>
   btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const sorted = (c: Record<string, unknown>) =>
+  "{" + Object.keys(c).sort().map((k) => JSON.stringify(k) + ":" + JSON.stringify(c[k])).join(",") + "}";
+const digest = async (s: string) => b64u(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s)));
 /** The change's id, computed the way infra/services/access/access.ts computes it. */
 async function changeId(c: Record<string, unknown>): Promise<string> {
-  const sorted = "{" + Object.keys(c).sort().map((k) => JSON.stringify(k) + ":" + JSON.stringify(c[k])).join(",") + "}";
-  return b64u(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(sorted))).slice(0, 22);
+  return (await digest(sorted(c))).slice(0, 22);
+}
+
+/**
+ * The check-in an inviter signs when their invite sets a role or levels:
+ * invite:<inviteId>:<12 chars of the hash of {levels, role}>, computed the way
+ * infra/services/access/access.ts computes it, so a link whose role is changed
+ * after signing fails to verify at the collective's server.
+ */
+export async function inviteSession(inviteId: string, role: string, levels: Record<string, Level>): Promise<string> {
+  const sortedLevels = Object.fromEntries(Object.keys(levels).sort().map((k) => [k, levels[k]]));
+  return `invite:${inviteId}:${(await digest(sorted({ levels: sortedLevels, role }))).slice(0, 12)}`;
+}
+
+export type SignResult = { ok: true; grant: string } | { ok: false; needsCheckIns?: boolean; error: string };
+
+/** Sign what an invite offers with the check-in key. The grant id rides in the invite so the collective can look the check-in up. */
+export async function signInvite(inviteId: string, role: string, levels: Record<string, Level>): Promise<SignResult> {
+  if (!base) return { ok: false, error: `${edition.instance.name} has no address for roles yet.` };
+  const r = await participate("invite", await inviteSession(inviteId, role, levels));
+  if (r.status === "needs-approval") return { ok: false, needsCheckIns: true, error: "A role on an invite is signed with your check-in key, and check-ins are off on this computer." };
+  if (r.status === "unsupported") return { ok: false, error: `${edition.instance.name}'s sign-in cannot sign invites yet.` };
+  if (r.status === "failed") return { ok: false, error: r.error };
+  const grant = liveGrantId();
+  return grant ? { ok: true, grant } : { ok: false, needsCheckIns: true, error: "Check-ins turned off while signing. Turn them on and try again." };
+}
+
+export type ClaimOutcome =
+  | { status: "none" }
+  | { status: "applied"; what: string }
+  | { status: "proposed"; what: string; approvers: string }
+  | { status: "already"; what: string; outcome: "waiting" | "approved" | "declined" }
+  | { status: "refused"; reason: string };
+export type ClaimResult = { ok: true; from: string | null; access: ClaimOutcome | null } | { ok: false; error: string };
+
+/**
+ * The newcomer's side: paste the invite link after signing in. The claim goes to the
+ * collective's invite door with the app's session, which proves who claimed it and
+ * records who brought them in. If the invite set a role or levels, the door hands
+ * them to the access server and the outcome comes back.
+ */
+export async function claimInvite(link: string, session: string): Promise<ClaimResult> {
+  const door = edition.invite?.base;
+  if (!door) return { ok: false, error: `${edition.instance.name} has no address for invites yet.` };
+  const frag = link.trim().replace(/^.*#/, "");
+  let p: any = null;
+  try {
+    const b64 = frag.replace(/-/g, "+").replace(/_/g, "/") + "=".repeat((4 - (frag.length % 4)) % 4);
+    const bin = atob(b64);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    p = JSON.parse(new TextDecoder().decode(bytes));
+  } catch {
+    p = null;
+  }
+  if (!p || p.v !== 1 || !p.inst?.slug || typeof p.ts !== "number") return { ok: false, error: "That doesn't look like an invite link." };
+  if (p.inst.slug !== edition.instance.slug) return { ok: false, error: `That invite is for ${p.inst.name || p.inst.slug}, not ${edition.instance.name}.` };
+  try {
+    const j = await post<{ ok: boolean; access?: ClaimOutcome }>(`${door}/api/murmur/invite`, { type: "claim", payload: p, session });
+    return { ok: true, from: p.from ?? null, access: j.access ?? null };
+  } catch (e: any) {
+    return { ok: false, error: e.message };
+  }
 }
 
 export type ProposeResult = { ok: true; what: string; already?: boolean } | { ok: false; needsCheckIns?: boolean; error: string };

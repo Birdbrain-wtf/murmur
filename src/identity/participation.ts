@@ -26,7 +26,8 @@ import { openInBrowser } from "./passkey";
 // ask: a plugin ask (ADR 0078, host/Asks.tsx). Its session is ask:<hash of the
 // ask>, so the check-in is the member's signature over what they asked for.
 // access: a proposed change to who can use what (lib/access.ts), the same shape.
-export type Kind = "meet" | "chat" | "place" | "ask" | "access";
+// share: a note the member chose to give the collective (lib/share.ts).
+export type Kind = "meet" | "chat" | "place" | "ask" | "access" | "share" | "invite";
 
 export interface Grant {
   id: string;

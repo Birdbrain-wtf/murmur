@@ -34,6 +34,8 @@ import {
 } from "../lib/sensemaking";
 import SharedEditor from "./SharedEditor";
 import { edition } from "../edition";
+import { shareNote, withdrawNote } from "../lib/share";
+import { approve } from "../identity/participation";
 import {
   Page,
   PageHeader,
@@ -75,6 +77,8 @@ interface LocalNote {
   /** vault path once synced (e.g. "notes/2026-…md"); absent while local-only */
   vaultPath?: string;
   synced: boolean;
+  /** set once the member chose to share this note with the collective (lib/share.ts) */
+  shared?: { id: string; at: number };
 }
 
 const KEY = "murmur.notes.v2";
@@ -290,6 +294,10 @@ function Panel({ instance, identity }: PluginContext) {
   const [results, setResults] = useState<VaultEntry[] | null>(null);
   const [searching, setSearching] = useState(false);
 
+  // Sharing one note: which note is waiting on the door, and what to say about it.
+  const [sharing, setSharing] = useState<string | null>(null);
+  const [shareMsg, setShareMsg] = useState<{ key: string; text: string } | null>(null);
+
   const ref = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -348,6 +356,10 @@ function Panel({ instance, identity }: PluginContext) {
     setIntent("");
     setTags([]);
     setPeople([]);
+    if (!edition.vaultSync) {
+      ref.current?.focus();
+      return;
+    }
     setCapturing(true);
     try {
       const res = await captureNote(base, {
@@ -396,7 +408,44 @@ function Panel({ instance, identity }: PluginContext) {
     }
   }
 
+  /** Share one note, or withdraw it. A missing check-in key is turned on with one tap, then tried again. */
+  async function shareToggle(n: LocalNote, again = false): Promise<boolean> {
+    setSharing(n.id);
+    setShareMsg(null);
+    try {
+      const r = n.shared
+        ? await withdrawNote(n.shared.id)
+        : await shareNote({ type: n.type, text: n.body, intent: n.intent, tags: n.tags, people: n.people.map(displayPerson) });
+      if (r.status === "needs-approval") {
+        if (!again && identity.session) {
+          setShareMsg({ key: n.id, text: "Sharing is signed with your check-in key. Approve it in your browser." });
+          await approve(identity.session);
+          return await shareToggle(n, true);
+        }
+        setShareMsg({ key: n.id, text: identity.session ? "Check-ins are still off on this computer." : "Sign in first. Sharing is signed with your passkey." });
+        return false;
+      }
+      if (r.status === "failed") {
+        setShareMsg({ key: n.id, text: r.error });
+        return false;
+      }
+      setNotes((prev) =>
+        prev.map((x) => (x.id === n.id ? { ...x, shared: r.status === "shared" ? { id: r.id, at: Date.now() } : undefined } : x)),
+      );
+      setShareMsg({ key: n.id, text: r.status === "shared" ? `Shared with ${edition.share?.name}. You can withdraw it at any time.` : "Withdrawn. It is no longer in the vault." });
+      return true;
+    } catch (e: any) {
+      setShareMsg({ key: n.id, text: e?.message || "That did not go through." });
+      return false;
+    } finally {
+      setSharing(null);
+    }
+  }
+
   async function removeItem(item: TrailItem) {
+    // a shared note is withdrawn first, so deleting it here never leaves a copy there
+    const local = notes.find((n) => n.id === item.key);
+    if (local?.shared && !(await shareToggle(local))) return;
     // delete from the vault if it lives there, then drop the local mirror
     if (item.vaultPath) {
       try {
@@ -419,6 +468,16 @@ function Panel({ instance, identity }: PluginContext) {
     setQuery(term);
     if (!q) {
       setResults(null);
+      return;
+    }
+    if (!edition.vaultSync) {
+      // notes live here, so search them here
+      const needle = q.toLowerCase();
+      setResults(
+        notes
+          .filter((n) => [n.body, n.intent, ...n.tags, ...n.people].some((f) => f.toLowerCase().includes(needle)))
+          .map((n) => ({ path: n.id, type: n.type, created: new Date(n.ts).toISOString(), tags: n.tags, people: n.people, intent: n.intent, title: n.body.slice(0, 80) })),
+      );
       return;
     }
     setSearching(true);
@@ -452,7 +511,10 @@ function Panel({ instance, identity }: PluginContext) {
   }, [notes, vaultRecent]);
 
   const showing: TrailItem[] | null = results
-    ? results.map(vaultToTrail)
+    ? results.map((r) => {
+        const n = notes.find((x) => x.id === r.path);
+        return n ? localToTrail(n) : vaultToTrail(r);
+      })
     : null;
 
   const headerStatus = loadingVault ? (
@@ -471,6 +533,8 @@ function Panel({ instance, identity }: PluginContext) {
 
   const keptWhere = edition.vaultSync
     ? `Syncs to ${edition.vaultName}`
+    : edition.share
+    ? "Saved on this device until you share it"
     : "Saved on this device";
 
   function openRoom() {
@@ -489,6 +553,8 @@ function Panel({ instance, identity }: PluginContext) {
             ? "Your space to think. No group sees it unless you share it."
             : edition.vaultSync
             ? `Capture a thought and why it matters. Kept in ${edition.vaultName}.`
+            : edition.share
+            ? `Capture a thought and why it matters. Kept on this device. Share a note with ${edition.share.name} when you want to, and take it back whenever you like.`
             : "Capture a thought and why it matters. Kept on this device, for you alone."
         }
         actions={
@@ -639,7 +705,7 @@ function Panel({ instance, identity }: PluginContext) {
               <Empty>Nothing matches “{query}”.</Empty>
             ) : (
               <Section label={`${showing.length} result${showing.length === 1 ? "" : "s"}`}>
-                <TrailList items={showing} onRemove={removeItem} onRetry={retry} notes={notes} />
+                <TrailList items={showing} onRemove={removeItem} onRetry={retry} notes={notes} onShare={shareToggle} sharing={sharing} shareMsg={shareMsg} />
               </Section>
             )
           ) : trail.length === 0 ? (
@@ -650,7 +716,7 @@ function Panel({ instance, identity }: PluginContext) {
             </Empty>
           ) : (
             <Section label="recent">
-              <TrailList items={trail} onRemove={removeItem} onRetry={retry} notes={notes} />
+              <TrailList items={trail} onRemove={removeItem} onRetry={retry} notes={notes} onShare={shareToggle} sharing={sharing} shareMsg={shareMsg} />
             </Section>
           )}
         </PageBody>
@@ -716,11 +782,17 @@ function TrailList({
   onRemove,
   onRetry,
   notes,
+  onShare,
+  sharing,
+  shareMsg,
 }: {
   items: TrailItem[];
   onRemove: (i: TrailItem) => void;
   onRetry: (n: LocalNote) => void;
   notes: LocalNote[];
+  onShare: (n: LocalNote) => void;
+  sharing: string | null;
+  shareMsg: { key: string; text: string } | null;
 }) {
   return (
     <List>
@@ -781,17 +853,34 @@ function TrailList({
                           </Button>
                         )}
                       </>
+                    ) : local?.shared ? (
+                      <>
+                        <Status tone="ok">Shared with {edition.share?.name}</Status>
+                        <Button variant="quiet" busy={sharing === local.id} onClick={() => onShare(local)}>
+                          Withdraw
+                        </Button>
+                      </>
                     ) : (
-                      <Status tone="idle">On this device</Status>
+                      <>
+                        <Status tone="idle">On this device</Status>
+                        {edition.share && local && (
+                          <Button variant="quiet" icon={Share2} busy={sharing === local.id} onClick={() => onShare(local)}>
+                            Share with {edition.share.name}
+                          </Button>
+                        )}
+                      </>
                     )}
                   </div>
+                  {shareMsg?.key === item.key && (
+                    <p className="mt-1.5 text-xs text-[var(--muted)]">{shareMsg.text}</p>
+                  )}
                 </>
               }
               action={
                 <button
                   onClick={() => onRemove(item)}
                   aria-label="Delete note"
-                  title={edition.vaultSync ? "Delete, from the vault too" : "Delete"}
+                  title={edition.vaultSync || local?.shared ? "Delete, from the vault too" : "Delete"}
                   className="text-[var(--faint)] opacity-0 transition group-hover:opacity-100 hover:text-[var(--danger)] focus:opacity-100"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -814,6 +903,6 @@ export const notesSurface: MurmurModule = {
   icon: NotebookPen,
   order: 1,
   kind: "core",
-  backend: edition.vaultSync ? "The Decent vault" : "On this device",
+  backend: edition.vaultSync ? "The Decent vault" : edition.share ? `On this device, shared with ${edition.share.name} by choice` : "On this device",
   Panel,
 };

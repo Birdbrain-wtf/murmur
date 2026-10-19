@@ -12,6 +12,10 @@ import {
   Phone,
   Video,
   LockKeyhole,
+  User,
+  Users,
+  PhoneIncoming,
+  PhoneOff,
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
@@ -37,6 +41,9 @@ import { MyRecordings } from "./recordings";
 import { DemoChat } from "./demo";
 import { PrivateChats } from "./private";
 import { Composer, Timeline } from "./conversation";
+import { messageContent, readMentions, roomPeople, type Mention } from "./mentions";
+import { AutoRecordStrip, useAutoRecord } from "./autorecord";
+import { acceptDirect, directRooms, listPeople, loaded, openDirect, ring, useRings, type Person } from "./people";
 
 /**
  * Chat plugin — Matrix.
@@ -73,6 +80,9 @@ interface EventLite {
   body: string;
   ts: number;
   mine: boolean;
+  name?: string;
+  mentions?: Mention[];
+  forMe?: boolean;
   /** shown the moment it is sent, before the server has it */
   pending?: boolean;
   txnId?: string;
@@ -120,6 +130,11 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
   const [notOpen, setNotOpen] = useState(false);
 
   const [rooms, setRooms] = useState<RoomLite[]>([]);
+  // Everyone this account shares a room with, and which room is one-to-one with whom.
+  const [people, setPeople] = useState<Person[]>([]);
+  const [directs, setDirects] = useState<Map<string, string>>(new Map());
+  const [sdk, setSdk] = useState<any>(null);
+  const [opening, setOpening] = useState<string | null>(null);
   const [activeRoom, setActiveRoom] = useState<string | null>(null);
   const [events, setEvents] = useState<EventLite[]>([]);
   const [draft, setDraft] = useState("");
@@ -153,7 +168,10 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
   const callRef = useRef<CallState | null>(null);
   callRef.current = call;
   const callers = useCallers(phase === "ready" ? client : null, activeRoom);
-  const recording = useRecording(phase === "ready" ? client : null, activeRoom);
+  const activeDirect = activeRoom ? directs.get(activeRoom) ?? null : null;
+  const recording = useRecording(phase === "ready" ? client : null, activeRoom, !!activeDirect);
+  const autoRecord = useAutoRecord(phase === "ready" && !activeDirect ? client : null, activeRoom);
+  const [incoming, dismissRing] = useRings(phase === "ready" ? client : null, sdk);
 
   // Signing in from the gate above opens chat straight away.
   const { signIn } = useIdentity();
@@ -219,6 +237,10 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
         }
       });
       c.on(sdk.RoomEvent.Timeline, () => refreshRooms(c, sdk));
+      // A new one-to-one room, or someone opening one with us, changes the People list.
+      c.on(sdk.ClientEvent.AccountData, () => refreshRooms(c, sdk));
+      c.on(sdk.RoomEvent.MyMembership, () => refreshRooms(c, sdk));
+      setSdk(sdk);
 
       await c.startClient({ initialSyncLimit: 30 });
       setClient(c);
@@ -228,9 +250,13 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
     }
   }
 
-  function refreshRooms(c: any, sdk: any) {
+  function refreshRooms(c: any, _sdk: any) {
+    const dms = directRooms(c);
+    setDirects(dms);
+    setPeople(listPeople(c));
     const list: RoomLite[] = c
       .getRooms()
+      .filter((r: any) => !dms.has(r.roomId))
       .map((r: any) => ({
         id: r.roomId,
         name: r.name || r.roomId,
@@ -329,6 +355,9 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
         body: ev.getContent()?.body ?? "",
         ts: ev.getTs(),
         mine: ev.getSender() === me,
+        name: room.getMember?.(ev.getSender())?.name,
+        mentions: readMentions(ev.getContent(), room),
+        forMe: ev.getSender() !== me && readMentions(ev.getContent(), room).some((m) => m.userId === me),
         txnId: ev.getTxnId?.() ?? ev.getUnsigned?.()?.transaction_id,
       });
       setEvents(
@@ -405,6 +434,24 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
     }
   }
 
+  // Open the one-to-one room with this person, making it the first time.
+  async function openPerson(p: Person) {
+    if (!client || opening) return;
+    if (p.roomId && !p.invited) return selectRoom(p.roomId);
+    setOpening(p.userId);
+    setError(null);
+    try {
+      const id = p.invited && p.roomId ? (await acceptDirect(client, p.roomId, p.userId), p.roomId) : await openDirect(client, p.userId);
+      await loaded(client, id);
+      refreshRooms(client, sdk);
+      selectRoom(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not open the conversation.");
+    } finally {
+      setOpening(null);
+    }
+  }
+
   async function join(roomId: string) {
     try {
       await client.joinRoom(roomId);
@@ -423,6 +470,8 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
     // Show it straight away. The server's copy takes the same place when it lands.
     const txnId = client.makeTxnId();
     const me = client.getUserId();
+    const content = messageContent(body, roomPeople(client, activeRoom));
+    const mentions = readMentions(content, client.getRoom(activeRoom));
     setEvents((prev) => [
       ...prev,
       {
@@ -431,12 +480,13 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
         body,
         ts: Date.now(),
         mine: true,
+        mentions,
         pending: true,
         txnId,
       },
     ]);
     try {
-      await client.sendTextMessage(activeRoom, body, txnId);
+      await client.sendMessage(activeRoom, content as any, txnId);
       // Speaking in a room is taking part: a signed check-in for this room today.
       // Reading is not, so opening a room records nothing (ADR 0069).
       void participate("chat", `chat:${activeRoom}@${today()}`);
@@ -450,20 +500,31 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
     }
   }
 
-  async function startCall(video: boolean) {
-    if (!client || !activeRoom || calling) return;
+  async function startCall(video: boolean, roomId = activeRoom) {
+    if (!client || !roomId || calling) return;
     if (call) await hangUp();
     setCalling(true);
     setError(null);
     try {
-      setCall(await joinCall(client, activeRoom, video));
+      const first = roomId === activeRoom ? callers === 0 : false;
+      setCall(await joinCall(client, roomId, video));
+      // Calling one person rings them; a group room's call is there for whoever opens it.
+      if (directs.has(roomId) && first) void ring(client, roomId, video);
       // Joining a call is taking part in the room, the same as speaking in it.
-      void participate("chat", `chat:${activeRoom}@${today()}`);
+      void participate("chat", `chat:${roomId}@${today()}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "The call did not start.");
     } finally {
       setCalling(false);
     }
+  }
+
+  async function answerRing(video: boolean) {
+    if (!incoming) return;
+    const id = incoming.roomId;
+    dismissRing(id);
+    selectRoom(id);
+    await startCall(video, id);
   }
 
   const hangUp = useCallback(async () => {
@@ -559,10 +620,36 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
   }
 
   // ── Ready: rooms + timeline ──────────────────────────────────────
-  const activeName = rooms.find((r) => r.id === activeRoom)?.name ?? "";
+  const activeName = activeDirect
+    ? people.find((p) => p.userId === activeDirect)?.name ?? shortSender(activeDirect)
+    : rooms.find((r) => r.id === activeRoom)?.name ?? "";
+  const q = search.toLowerCase();
+  const shownPeople = people.filter((p) => p.name.toLowerCase().includes(q) || p.userId.toLowerCase().includes(q));
+  const shownRooms = rooms.filter((r) => r.name.toLowerCase().includes(q));
+  const roomName = (id: string) =>
+    directs.has(id) ? people.find((p) => p.userId === directs.get(id))?.name ?? "them" : rooms.find((r) => r.id === id)?.name ?? "another room";
   return (
     <Page>
       {header}
+      {incoming && call?.roomId !== incoming.roomId && (
+        <div role="alert" className="flex flex-wrap items-center gap-2 border-b border-[var(--line)] px-8 py-3 text-[13px]">
+          <PhoneIncoming className="h-4 w-4 text-[var(--accent)]" />
+          <span className="font-medium">
+            {incoming.name} is {incoming.video ? "video " : ""}calling you
+          </span>
+          <span className="ml-auto flex flex-wrap gap-2">
+            <Button variant="primary" icon={Phone} busy={calling} onClick={() => void answerRing(false)}>
+              Answer
+            </Button>
+            <Button icon={Video} busy={calling} onClick={() => void answerRing(true)}>
+              Answer with video
+            </Button>
+            <Button variant="quiet" icon={PhoneOff} onClick={() => dismissRing(incoming.roomId)}>
+              Not now
+            </Button>
+          </span>
+        </div>
+      )}
       <div className="chat-layout" data-conversation={conversation}>
         <aside className="chat-sidebar" aria-label="Rooms">
           <div className="border-b border-[var(--line)] px-8 py-3">
@@ -570,7 +657,7 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
           </div>
           <label className="mx-3 mt-3 flex items-center gap-2">
             <Search size={16} aria-hidden="true" />
-            <input type="search" aria-label="Find a room" placeholder="Find a room" value={search} onChange={(e) => setSearch(e.target.value)} className={`${inputClass} min-w-0 flex-1`} />
+            <input type="search" aria-label="Find a person or room" placeholder="Find a person or room" value={search} onChange={(e) => setSearch(e.target.value)} className={`${inputClass} min-w-0 flex-1`} />
           </label>
           <form onSubmit={startDirect} className="flex items-center gap-2 border-b border-[var(--line)] px-4 py-3">
             <input
@@ -591,8 +678,8 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
             />
           </form>
           <div className="chat-room-list min-h-0 flex-1 overflow-y-auto">
-            {search && !rooms.some((r) => r.name.toLowerCase().includes(search.toLowerCase())) && <p className="px-4 py-3 text-sm text-[var(--muted)]">No rooms match your search.</p>}
-            {rooms.filter((r) => r.name.toLowerCase().includes(search.toLowerCase())).map((r) => r.invited ? (
+            {search && !shownRooms.length && !shownPeople.length && <p className="px-4 py-3 text-sm text-[var(--muted)]">Nobody and no room matches that.</p>}
+            {shownRooms.map((r) => r.invited ? (
               <div key={r.id} className="flex items-center gap-2 px-4 py-2 text-sm text-[var(--muted)]">
                 <Hash className="h-3.5 w-3.5 shrink-0 text-[var(--faint)]" />
                 <span className="truncate">{r.name}</span>
@@ -619,6 +706,34 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
             ))}
             {rooms.length === 0 && (
               <p className="px-4 py-2 text-xs text-[var(--faint)]">No rooms yet.</p>
+            )}
+            <div className="mt-3 px-4 py-2">
+              <Eyebrow icon={Users}>people</Eyebrow>
+            </div>
+            {shownPeople.map((p) => (
+              <button
+                key={p.userId}
+                onClick={() => void openPerson(p)}
+                aria-current={p.roomId && p.roomId === activeRoom ? "true" : undefined}
+                data-active={!!p.roomId && p.roomId === activeRoom}
+                title={p.userId}
+                className="chat-room prism-hover flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[var(--muted)] data-[active=true]:text-[var(--fg)]"
+              >
+                <User className="h-3.5 w-3.5 shrink-0 text-[var(--faint)]" />
+                <span className="truncate">{p.name}</span>
+                <span className="ml-auto font-mono text-xs">
+                  {opening === p.userId
+                    ? "opening"
+                    : p.invited
+                      ? "wants to talk"
+                      : p.unread > 0
+                        ? <span aria-label={`${p.unread} unread messages`}>{p.unread}</span>
+                        : null}
+                </span>
+              </button>
+            ))}
+            {people.length === 0 && (
+              <p className="px-4 py-2 text-xs text-[var(--faint)]">Nobody else here yet.</p>
             )}
           </div>
           <div className="border-t border-[var(--line)] p-2">
@@ -675,8 +790,8 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
             <>
               <div className="chat-room-header">
                 <span className="chat-back"><Button icon={ArrowLeft} aria-label="Back to rooms" onClick={() => setConversation(false)} /></span>
-                <Hash className="h-4 w-4 text-[var(--faint)]" />
-                <span className="font-tight min-w-0 flex-1 truncate text-sm font-medium">{activeName || "Group rooms"}</span>
+                {activeDirect ? <User className="h-4 w-4 text-[var(--faint)]" /> : <Hash className="h-4 w-4 text-[var(--faint)]" />}
+                <span className="font-tight min-w-0 flex-1 truncate text-sm font-medium" title={activeDirect ?? undefined}>{activeName || "Group rooms"}</span>
                 {call?.roomId !== activeRoom && activeRoom && (
                   <span className="ml-auto flex flex-wrap items-center gap-2">
                     {callers > 0 && (
@@ -688,11 +803,11 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
                     {callers > 0 && recording.active && (
                       <span className="flex items-center gap-1.5 font-mono text-[11px] text-[var(--danger)]">
                         <Dot tone="danger" />
-                        recording, you join with your microphone off
+                        {autoRecord.on ? "recording" : "recording, you join with your microphone off"}
                       </span>
                     )}
                     <Button icon={Phone} busy={calling} onClick={() => void startCall(false)}>
-                      {callers > 0 ? "Join with voice" : "Voice call"}
+                      {callers > 0 ? "Join with voice" : activeDirect ? `Call ${activeName}` : "Voice call"}
                     </Button>
                     <Button icon={Video} busy={calling} onClick={() => void startCall(true)}>
                       {callers > 0 ? "Join with video" : "Video call"}
@@ -700,13 +815,14 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
                   </span>
                 )}
               </div>
+              {autoRecord.on && activeRoom && !activeDirect && <AutoRecordStrip client={client} roomId={activeRoom} auto={autoRecord} />}
               {call && call.roomId === activeRoom && (
-                <CallStage call={call} name={shortSender} onLeave={hangUp} client={client} />
+                <CallStage call={call} name={shortSender} onLeave={hangUp} client={client} direct={!!activeDirect} auto={autoRecord} />
               )}
               {call && call.roomId !== activeRoom && (
                 <div className="flex items-center gap-2 border-b border-[var(--line)] px-8 py-2 text-[13px] text-[var(--muted)]">
                   <Dot tone="live" />
-                  In a call in {rooms.find((r) => r.id === call.roomId)?.name ?? "another room"}.
+                  {directs.has(call.roomId) ? `In a call with ${roomName(call.roomId)}.` : `In a call in ${roomName(call.roomId)}.`}
                   <Button variant="quiet" onClick={() => setActiveRoom(call.roomId)}>
                     Go back
                   </Button>
@@ -721,7 +837,7 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
                   <Notice tone="danger">{error}</Notice>
                 </div>
               )}
-              <Composer value={draft} onChange={editDraft} onSend={send} name={activeName} disabled={!activeRoom} />
+              <Composer value={draft} onChange={editDraft} onSend={send} name={activeName} people={roomPeople(client, activeRoom)} disabled={!activeRoom} />
             </>
           )}
         </section>

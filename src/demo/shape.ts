@@ -103,12 +103,55 @@ export interface Made {
   hero?: Art;
   /** a pack only: a live experiment on one of our own sites, played inside the plugin */
   live?: Live;
+  /** a pack only: artist pages, each with its films, photographs, records and events */
+  profiles?: Profile[];
 }
 
 export interface Live {
   src: string;
   /** what it is, under the frame */
   label: string;
+}
+
+/** Where a pack's films play from: Four To The Floor's own Cloudflare Stream account
+ *  (the same host its site plays from). A film is its 32-character id there. */
+export const FILM_HOST = "https://customer-i2rk13nwwjpeip2z.cloudflarestream.com";
+export interface Film {
+  id: string;
+  /** what it is, under the player */
+  label?: string;
+}
+export const filmSrc = (f: Film) => `${FILM_HOST}/${f.id}/iframe?preload=metadata&letterboxColor=transparent`;
+
+/** One thing on an artist's page: a film, a photograph, a record or an event. */
+export type ReleaseKind = "film" | "photograph" | "record" | "event";
+export interface Release {
+  kind: ReleaseKind;
+  title: string;
+  line: string;
+  /** when it is, or was: a date, "pre-order", "out now" */
+  when?: string;
+  status?: string;
+  /** a sample price, for records and tickets */
+  price?: string;
+  art?: Art;
+  /** a film plays in the page's player */
+  film?: Film;
+}
+
+/** A pack only: an artist's page inside a made plugin. The film and the record live
+ *  in one place, with the credits, so the person the film moves buys it in one tap. */
+export interface Profile {
+  slug: string;
+  name: string;
+  line: string;
+  about: string;
+  hero?: Art;
+  /** the film at the top of the page */
+  film?: Film;
+  /** short facts: members, home, since */
+  facts?: [string, string][];
+  releases: Release[];
 }
 
 export interface Shape {
@@ -289,7 +332,8 @@ const person = (v: unknown, i: number) => pick(v, PEOPLE, PEOPLE[i % 3]);
 /** Clamp anything (the model's answer, a stored sketch) into a Shape the app can draw. */
 export function normaliseShape(raw: unknown, asked: string, base: Shape): Shape {
   const r = obj(raw);
-  const madeRaw = arr(r.made).slice(0, 3).map(obj);
+  // Up to four: a pack may carry an artist pages plugin beside the three it had.
+  const madeRaw = arr(r.made).slice(0, 4).map(obj);
   const made: Made[] = madeRaw
     .map((m) => ({
       title: str(m.title, 22),
@@ -846,6 +890,8 @@ export function normalisePack(raw: unknown): Shape {
     const rm = rawMade.find((x) => str(x.title, 22) === md.title);
     md.hero = art(rm?.hero);
     md.live = live(rm?.live);
+    const pages = arr(rm?.profiles).slice(0, 6).map(profile).filter((p): p is Profile => !!p);
+    if (pages.length) md.profiles = pages;
   });
   const brief = obj(r.brief);
   const jobs = arr(brief.jobs)
@@ -871,6 +917,57 @@ function live(v: unknown): Live | undefined {
   const src = typeof l.src === "string" && /^https:\/\/([a-z0-9-]+\.)?(decent\.partners|birdbrain\.wtf)\/[a-z0-9/_.-]*$/i.test(l.src) ? l.src : "";
   if (!src) return undefined;
   return { src, label: str(l.label, 140) };
+}
+
+/** A pack's film: an id on Four To The Floor's own Stream account, nothing else. */
+function film(v: unknown): Film | undefined {
+  const f = obj(v);
+  const id = typeof f.id === "string" && /^[0-9a-f]{32}$/.test(f.id) ? f.id : "";
+  if (!id) return undefined;
+  return { id, label: str(f.label, 140) || undefined };
+}
+const RELEASE_KINDS: ReleaseKind[] = ["film", "photograph", "record", "event"];
+function release(v: unknown): Release | undefined {
+  const x = obj(v);
+  const title = str(x.title, 70);
+  if (!title) return undefined;
+  const out: Release = { kind: pick(x.kind, RELEASE_KINDS, "film"), title, line: str(x.line, 180) };
+  const when = str(x.when, 40);
+  const status = str(x.status, 20);
+  const price = str(x.price, 12);
+  if (when) out.when = when;
+  if (status) out.status = status;
+  if (price) out.price = price;
+  const a = art(x.art);
+  const f = film(x.film);
+  if (a) out.art = a;
+  if (f) out.film = f;
+  return out;
+}
+/** An artist's page in a pack: its name, its line, its film and what it has to show and sell. */
+function profile(v: unknown): Profile | undefined {
+  const p = obj(v);
+  const slug = typeof p.slug === "string" && /^[a-z0-9-]{2,32}$/.test(p.slug) ? p.slug : "";
+  const name = str(p.name, 40);
+  if (!slug || !name) return undefined;
+  const out: Profile = {
+    slug,
+    name,
+    line: str(p.line, 120),
+    about: str(p.about, 600),
+    releases: arr(p.releases).slice(0, 16).map(release).filter((r): r is Release => !!r),
+  };
+  const hero = art(p.hero);
+  const lead = film(p.film);
+  if (hero) out.hero = hero;
+  if (lead) out.film = lead;
+  const facts = arr(p.facts)
+    .filter((f): f is [unknown, unknown] => Array.isArray(f) && f.length === 2)
+    .map(([k, val]) => [str(k, 20), str(val, 60)] as [string, string])
+    .filter(([k, val]) => k && val)
+    .slice(0, 4);
+  if (facts.length) out.facts = facts;
+  return out;
 }
 
 /** A pack's picture, only ever a file it ships with (`/packs/<id>/<name>`). */

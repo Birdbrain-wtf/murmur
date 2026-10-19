@@ -9,6 +9,7 @@ import { PasskeySignIn } from "../../identity/SignIn";
 import { sessionRejected } from "../../identity/session";
 import { useIdentity } from "../../identity/useIdentity";
 import { Button, PageBody } from "../../ui";
+import { demoNote } from "../../demo/note";
 
 /**
  * Watch: the Four To The Floor channel, inside the app (rich, 2026-10-17).
@@ -24,6 +25,10 @@ import { Button, PageBody } from "../../ui";
  * The frame's "Sign in" opens the app's own sign-in here; a session the door
  * refuses signs the app out of FTTF as any other plugin would. Links that leave
  * the channel open in the member's browser, so the picture keeps playing.
+ *
+ * In FTTF's sketch (edition fttfdemo, 2026-10-18) the same plugin sits in the rail
+ * after what was made for the crew, plays as a guest, and a press on the frame's
+ * "Sign in" only says what it would do, as every other door in a sketch does.
  *
  * In any other collective's window (Birdbrain, Decent: offered there to add,
  * 2026-10-17) the channel plays as a guest. That window's session is the other
@@ -55,7 +60,11 @@ function Panel({ identity }: PluginContext) {
       const m = e.data;
       if (!m || typeof m.type !== "string") return;
       if (m.type === "fttf:ready") send();
-      else if (m.type === "fttf:sign-in") setAsking(true);
+      else if (m.type === "fttf:sign-in") {
+        // In a sketch (FTTF's own, one rung back) there are no logins yet: say what would happen.
+        if (edition.demo) demoNote("In your own app this opens Four To The Floor's sign-in, email or passkey at its own door. The channel keeps playing.");
+        else setAsking(true);
+      }
       else if (m.type === "fttf:session-rejected") {
         if (HOME) sessionRejected(current.current);
       }

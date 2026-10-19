@@ -24,8 +24,8 @@ const STAGES = [
   },
   {
     icon: KeyRound,
-    title: "A clean start",
-    body: "Nothing is copied across. The new inbox starts empty, without years of old mail and spam. Once the domain moves, Google is kept for a month so nothing in flight is lost.",
+    title: "Forward first, then move",
+    body: "New mail is forwarded from Google to our own server while it proves itself. Old mail and years of spam are never copied across. Once everything works, the domain moves and forwarding stops, with Google kept for a month so nothing in flight is lost.",
   },
 ];
 
