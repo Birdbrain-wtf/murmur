@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, X, Fingerprint, ArrowUpRight } from "lucide-react";
+import { Plus, X, Fingerprint, ArrowUpRight, ArrowUp, ArrowDown, RotateCcw } from "lucide-react";
 import type { MurmurModule } from "./types";
 import {
   coreModules,
@@ -9,6 +9,7 @@ import {
   isStandard,
 } from "./registry";
 import { useInstalled } from "./useInstalled";
+import { arrange, useRailOrder } from "./useRailOrder";
 import { useIdentity } from "../identity/useIdentity";
 import { logoUrl, useSkin } from "./useSkin";
 import { useUpdater } from "./useUpdater";
@@ -31,6 +32,7 @@ const UPGRADE_DOT = "#af52de";
 
 export default function App() {
   const { installed, install, uninstall, isInstalled } = useInstalled();
+  const rail = useRailOrder();
   const { identity } = useIdentity();
   const { skin } = useSkin();
   const updater = useUpdater();
@@ -63,9 +65,18 @@ export default function App() {
   // The rail shows only what this sign-in can use (lib/reach.ts); the Plugins sheet still lists everything installed.
   const { visible } = useReach(installed, identity.session);
   const installedPlugins = useMemo(
-    () => pluginCatalog.filter((p) => visible.includes(p.id)),
-    [visible],
+    () => arrange(pluginCatalog.filter((p) => visible.includes(p.id)), rail.order),
+    [visible, rail.order],
   );
+  const shownIds = installedPlugins.map((p) => p.id);
+  const moveTo = useCallback(
+    (id: string, to: number) => rail.move(shownIds, id, to),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rail.move, shownIds.join(",")],
+  );
+  // Dragging a plugin in the rail: which one, and the slot it would land in.
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [slot, setSlot] = useState<number | null>(null);
 
   const active = useMemo(() => {
     const m = getModule(activeId);
@@ -103,12 +114,32 @@ export default function App() {
 
             {!isDemo && <div className="hidden h-px w-6 bg-[var(--line)] md:my-1.5 md:block" />}
 
-            {installedPlugins.map((p) => (
+            {installedPlugins.map((p, i) => (
               <RailButton
                 key={p.id}
                 mod={p}
                 active={active.id === p.id}
                 onClick={open}
+                drag={{
+                  dragging: dragging === p.id,
+                  before: slot === i && dragging !== null && dragging !== p.id,
+                  after: slot === installedPlugins.length && i === installedPlugins.length - 1 && dragging !== p.id,
+                  onStart: () => setDragging(p.id),
+                  onOver: (after) => setSlot(after ? i + 1 : i),
+                  onDrop: () => {
+                    if (dragging && slot !== null) {
+                      const from = shownIds.indexOf(dragging);
+                      moveTo(dragging, slot > from ? slot - 1 : slot);
+                    }
+                    setDragging(null);
+                    setSlot(null);
+                  },
+                  onEnd: () => {
+                    setDragging(null);
+                    setSlot(null);
+                  },
+                  onKeyMove: (by) => moveTo(p.id, i + by),
+                }}
               />
             ))}
 
@@ -188,6 +219,9 @@ export default function App() {
           onOpen={open}
           onClose={() => setCatalogOpen(false)}
           identity={identity}
+          railPlugins={installedPlugins}
+          moveTo={moveTo}
+          resetOrder={rail.custom ? rail.reset : undefined}
         />
       )}
 
@@ -206,20 +240,67 @@ export default function App() {
   );
 }
 
+type RailDrag = {
+  dragging: boolean;
+  before: boolean;
+  after: boolean;
+  onStart: () => void;
+  onOver: (after: boolean) => void;
+  onDrop: () => void;
+  onEnd: () => void;
+  /** Alt with an arrow key moves the plugin one place, for keyboards. */
+  onKeyMove: (by: number) => void;
+};
+
 function RailButton({
   mod,
   active,
   onClick,
+  drag,
 }: {
   mod: MurmurModule;
   active: boolean;
   onClick: (id: string) => void;
+  drag?: RailDrag;
 }) {
   const Icon = mod.icon;
   return (
     <button
       onClick={() => onClick(mod.id)}
-      title={`${mod.title}${mod.lab ? " (lab)" : ""}: ${mod.tagline}`}
+      draggable={!!drag}
+      data-dragging={drag?.dragging || undefined}
+      data-drop={drag?.before ? "before" : drag?.after ? "after" : undefined}
+      onDragStart={
+        drag &&
+        ((e) => {
+          e.dataTransfer.effectAllowed = "move";
+          e.dataTransfer.setData("text/plain", mod.id);
+          drag.onStart();
+        })
+      }
+      onDragOver={
+        drag &&
+        ((e) => {
+          e.preventDefault();
+          const r = e.currentTarget.getBoundingClientRect();
+          const vertical = r.height >= r.width * 0.6 && window.matchMedia("(min-width: 768px)").matches;
+          drag.onOver(vertical ? e.clientY > r.top + r.height / 2 : e.clientX > r.left + r.width / 2);
+        })
+      }
+      onDrop={drag && ((e) => { e.preventDefault(); drag.onDrop(); })}
+      onDragEnd={drag?.onEnd}
+      onKeyDown={
+        drag &&
+        ((e) => {
+          if (!e.altKey) return;
+          const by = e.key === "ArrowUp" || e.key === "ArrowLeft" ? -1 : e.key === "ArrowDown" || e.key === "ArrowRight" ? 1 : 0;
+          if (!by) return;
+          e.preventDefault();
+          drag.onKeyMove(by);
+          requestAnimationFrame(() => document.querySelector<HTMLButtonElement>(`[data-tour="${mod.id}"]`)?.focus());
+        })
+      }
+      title={`${mod.title}${mod.lab ? " (lab)" : ""}: ${mod.tagline}${drag ? ". Drag to move it" : ""}`}
       data-active={active}
       aria-current={active ? "page" : undefined}
       aria-label={`${mod.title}${mod.lab ? " (lab)" : ""}`}
@@ -251,8 +332,14 @@ function Catalog({
   onOpen,
   onClose,
   identity,
+  railPlugins,
+  moveTo,
+  resetOrder,
 }: {
   identity: Identity;
+  railPlugins: MurmurModule[];
+  moveTo: (id: string, to: number) => void;
+  resetOrder?: () => void;
   tab: CatalogTab;
   setTab: (t: CatalogTab) => void;
   installed: string[];
@@ -361,6 +448,9 @@ function Catalog({
           {!access && asking && !ask && q.trim() && (
             <SearchResults q={q} carried={pluginCatalog} renderRow={row} registry={registry} onAsk={(plugin, title) => setAsk({ plugin, title })} />
           )}
+          {!access && !ask && !q.trim() && railPlugins.length > 1 && (
+            <RailOrder plugins={railPlugins} moveTo={moveTo} reset={resetOrder} />
+          )}
           {!access && !ask && !q.trim() && TIERS.map((t) => {
             const list = pluginCatalog.filter((p) => tierOf(edition, p.id) === t.id);
             return (
@@ -459,5 +549,65 @@ function CatalogRow({
         </Button>
       )}
     </article>
+  );
+}
+
+/** The rail's order, with a move up and down for each plugin. Dragging in the
+ *  rail does the same; this is the way on a phone or a keyboard. */
+function RailOrder({
+  plugins,
+  moveTo,
+  reset,
+}: {
+  plugins: MurmurModule[];
+  moveTo: (id: string, to: number) => void;
+  reset?: () => void;
+}) {
+  return (
+    <section className="flex flex-col gap-2" aria-label="Order in the sidebar">
+      <div className="flex items-baseline gap-2 px-1">
+        <span className="font-tight text-sm font-medium">Order</span>
+        <span className="text-xs text-[var(--faint)]">
+          How they sit in the sidebar on this computer. You can also drag them there.
+        </span>
+        {reset && (
+          <button
+            onClick={reset}
+            className="ml-auto inline-flex shrink-0 items-center gap-1 text-xs text-[var(--muted)] hover:text-[var(--fg)]"
+          >
+            <RotateCcw className="h-3 w-3" />
+            Usual order
+          </button>
+        )}
+      </div>
+      <ol className="flex flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--line)]">
+        {plugins.map((p, i) => {
+          const Icon = p.icon;
+          return (
+            <li key={p.id} className="flex items-center gap-3 border-b border-[var(--line)] px-3 py-1.5 last:border-b-0">
+              <span className="w-4 text-right text-xs tabular-nums text-[var(--faint)]">{i + 1}</span>
+              <Icon className="h-4 w-4 text-[var(--muted)]" />
+              <span className="flex-1 text-sm">{p.title}</span>
+              <button
+                onClick={() => moveTo(p.id, i - 1)}
+                disabled={i === 0}
+                aria-label={`Move ${p.title} up`}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--raise)] hover:text-[var(--fg)] disabled:opacity-30"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </button>
+              <button
+                onClick={() => moveTo(p.id, i + 1)}
+                disabled={i === plugins.length - 1}
+                aria-label={`Move ${p.title} down`}
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-[var(--muted)] hover:bg-[var(--raise)] hover:text-[var(--fg)] disabled:opacity-30"
+              >
+                <ArrowDown className="h-4 w-4" />
+              </button>
+            </li>
+          );
+        })}
+      </ol>
+    </section>
   );
 }
