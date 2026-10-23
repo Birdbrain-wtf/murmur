@@ -5,8 +5,10 @@ import {
   Check,
   ChevronDown,
   CornerDownLeft,
+  History,
   RotateCcw,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
@@ -18,6 +20,7 @@ import { signInToOps } from "../../lib/ops";
 import { useReach } from "../../lib/reach";
 import { supported as checkInsSupported, useParticipation } from "../../identity/participation";
 import { sampleAnswers, sampleFallback } from "../../demo/sample";
+import { askClaude, claudeStatus } from "../../lib/claude";
 
 /**
  * The collective's own agent, inside the app. Named after the edition (Decent,
@@ -36,10 +39,22 @@ import { sampleAnswers, sampleFallback } from "../../demo/sample";
  * What the agent is told about this member is a short report (`report()`):
  * flags and counts, never a key's name or value, a message or a note. The
  * conversation stays on this computer and goes back with each question as
- * history, like the web page; the server keeps none of it.
+ * history, like the web page; the server keeps none of it. Past conversations
+ * are kept too, on this computer only, and listed under Conversations.
+ *
+ * Two ways to answer (rich, 2026-10-21). The collective's own model, through
+ * the door, by default. Or, when this computer has Claude Code, the member's
+ * own Claude, as their general assistant: it answers anything, and the door
+ * (or `edition.context`, Decent's own box) sends the passages from the
+ * collective's documents and the app guide for the questions that need them.
+ * Claude Code runs it here, on the member's own subscription (lib/claude.ts).
  */
 
+/** Before conversations were kept: one running thread. Read once, then folded into the list. */
 const THREAD_KEY = "murmur.agent.v1";
+const CONVOS_KEY = "murmur.agent.conversations.v1";
+const ENGINE_KEY = "murmur.agent.engine.v1";
+const MAX_CONVOS = 50;
 const FOLD_KEY = "murmur.agent.setup-folded.v1";
 const MATRIX_KEY = "murmur.matrix.session.v1";
 const INVITED_KEY = "murmur.invited.v1";
@@ -50,24 +65,60 @@ interface Turn {
   actions?: string[];
   error?: string;
   at: number;
+  /** Answered by the member's own Claude rather than the collective's model. */
+  by?: "claude";
 }
 
-function loadThread(): Turn[] {
+interface Conversation {
+  id: string;
+  at: number;
+  turns: Turn[];
+}
+
+const turnsOf = (t: unknown): Turn[] => (Array.isArray(t) ? t.filter((x) => x && typeof x.q === "string") : []);
+
+function loadConvos(): Conversation[] {
   try {
-    const t = JSON.parse(localStorage.getItem(THREAD_KEY) || "[]");
-    return Array.isArray(t) ? t.filter((x) => x && typeof x.q === "string") : [];
+    const list = JSON.parse(localStorage.getItem(CONVOS_KEY) || "null");
+    if (Array.isArray(list)) {
+      return list
+        .filter((c) => c && typeof c.id === "string")
+        .map((c) => ({ id: c.id, at: Number(c.at) || 0, turns: turnsOf(c.turns) }))
+        .filter((c) => c.turns.length);
+    }
+    // First run with conversations: the old single thread becomes the first one.
+    const old = turnsOf(JSON.parse(localStorage.getItem(THREAD_KEY) || "[]"));
+    return old.length ? [{ id: crypto.randomUUID(), at: old[old.length - 1].at, turns: old }] : [];
   } catch {
     return [];
   }
 }
 
-function saveThread(t: Turn[]) {
+function saveConvos(list: Conversation[]) {
   try {
-    localStorage.setItem(THREAD_KEY, JSON.stringify(t.slice(-40)));
+    const kept = [...list]
+      .filter((c) => c.turns.length)
+      .sort((a, b) => b.at - a.at)
+      .slice(0, MAX_CONVOS)
+      .map((c) => ({ ...c, turns: c.turns.slice(-40) }));
+    localStorage.setItem(CONVOS_KEY, JSON.stringify(kept));
+    localStorage.removeItem(THREAD_KEY);
   } catch {
     /* a full store costs the history, never the answer */
   }
 }
+
+const titleOf = (c: Conversation) => {
+  const q = c.turns.find((t) => t.q && t.q !== "(not sent)")?.q ?? "A conversation";
+  return q.length > 80 ? `${q.slice(0, 78)}…` : q;
+};
+
+const whenOf = (at: number) => {
+  const d = new Date(at);
+  const today = new Date();
+  if (d.toDateString() === today.toDateString()) return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", ...(d.getFullYear() === today.getFullYear() ? {} : { year: "numeric" }) });
+};
 
 /** Something that looks like a key or token. Never sent: it belongs in Settings.
  *  The door strips the same shapes (room-agent engine/app-door.ts). */
@@ -81,7 +132,16 @@ const visible = (s: string) =>
     .filter((l) => !/^\s*\**\s*ACTION\s*:/i.test(l))
     .join("\n")
     .replace(/\*\*/g, "")
+    .replace(/\s+[—–]\s+/g, ", ")
     .trim();
+
+/** The places an answer points to, as buttons: only ones this edition has, two at most. */
+function takeActions(s: string): { a: string; actions: string[] } {
+  const places = [...s.matchAll(/ACTION\s*:\s*\**\s*open\s*:\s*([A-Za-z]+)/gi)]
+    .map((m) => m[1].toLowerCase())
+    .filter((p) => !!getModule(p));
+  return { a: visible(s.replace(/[ \t]*\**[ \t]*ACTION[ \t]*:[ \t]*\**[ \t]*open[ \t]*:[ \t]*[A-Za-z]+\**[.,]?/gi, "")), actions: [...new Set(places)].slice(0, 2) };
+}
 
 // ── the setup list ──────────────────────────────────────────────────────────
 
@@ -231,6 +291,38 @@ async function ask(
   }
 }
 
+/**
+ * The same question for the member's own Claude, as a general assistant: the
+ * collective composes the prompt with whatever of its documents match, and
+ * Claude Code runs it here.
+ */
+async function askOwnClaude(
+  session: string,
+  question: string,
+  history: Turn[],
+  state: unknown,
+  onToken: (t: string) => void,
+  signal: AbortSignal,
+): Promise<string> {
+  const r = await fetch(edition.context ?? `${edition.signIn.pair}/context`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({
+      session,
+      question,
+      history: history.filter((t) => t.a && !t.error).slice(-6).map((t) => ({ q: t.q, a: t.a })),
+      state,
+      general: true,
+    }),
+    signal,
+  });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401) throw new Error("Your sign-in has run out. Sign in again in Identity.");
+  if (!r.ok) throw new Error(j.error || `The door answered ${r.status}.`);
+  if (j.empty) return String(j.answer || "");
+  return askClaude({ system: String(j.system), prompt: String(j.user), onToken, signal });
+}
+
 // ── the panel ───────────────────────────────────────────────────────────────
 
 function Panel({ identity, open, installed: installedIds }: PluginContext) {
@@ -240,7 +332,37 @@ function Panel({ identity, open, installed: installedIds }: PluginContext) {
     identity.session,
   );
   const steps = useSetup(identity, installed);
-  const [thread, setThread] = useState<Turn[]>(loadThread);
+  const [convos, setConvos] = useState<Conversation[]>(loadConvos);
+  // The conversation on screen, the latest one to start with. Null is a fresh
+  // one, made on its first question.
+  const [currentId, setCurrentId] = useState<string | null>(() => [...convos].sort((a, b) => b.at - a.at)[0]?.id ?? null);
+  const [listOpen, setListOpen] = useState(false);
+  const newId = useRef<string>(crypto.randomUUID());
+  const thread = useMemo(() => convos.find((c) => c.id === currentId)?.turns ?? [], [convos, currentId]);
+  const setThread = (next: Turn[] | ((t: Turn[]) => Turn[])) => {
+    setConvos((list) => {
+      const id = currentId ?? newId.current;
+      const had = list.find((c) => c.id === id);
+      const turns = typeof next === "function" ? next(had?.turns ?? []) : next;
+      const rest = list.filter((c) => c.id !== id);
+      return turns.length ? [{ id, at: Date.now(), turns }, ...rest] : rest;
+    });
+    if (!currentId) setCurrentId(newId.current);
+  };
+  const startNew = () => {
+    newId.current = crypto.randomUUID();
+    setCurrentId(null);
+    setListOpen(false);
+  };
+  // Who answers: the collective's own model, or the member's own Claude on this computer.
+  const [claude, setClaude] = useState<{ found: boolean; version?: string | null }>({ found: false });
+  const [engine, setEngine] = useState<"group" | "claude">(() => (localStorage.getItem(ENGINE_KEY) === "claude" ? "claude" : "group"));
+  useEffect(() => {
+    void claudeStatus().then(setClaude);
+  }, []);
+  useEffect(() => {
+    localStorage.setItem(ENGINE_KEY, engine);
+  }, [engine]);
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState<{ q: string; text: string; waited: number } | null>(null);
   const [folded, setFolded] = useState(() => localStorage.getItem(FOLD_KEY) !== "0");
@@ -256,11 +378,15 @@ function Panel({ identity, open, installed: installedIds }: PluginContext) {
   // Huxley's own story (not a visitor's sketch): the agent opens on a read of everything.
   const story = !!edition.showcase && !shaped;
   const canAsk = signedIn || scripted;
+  const ownClaude = engine === "claude" && claude.found && signedIn && !scripted;
   const doneCount = steps.filter((s) => s.done).length;
   const allDone = doneCount === steps.length;
   const next = steps.find((s) => !s.done);
 
-  useEffect(() => saveThread(thread), [thread]);
+  const loaded = useRef(convos);
+  useEffect(() => {
+    if (convos !== loaded.current) saveConvos(convos);
+  }, [convos]);
   // Follow the conversation as it grows, but open at the top so the setup list shows.
   useEffect(() => {
     if (thread.length || busy) end.current?.scrollIntoView({ block: "end" });
@@ -304,6 +430,31 @@ function Panel({ identity, open, installed: installedIds }: PluginContext) {
     abort.current = ctl;
     let text = "";
     let final: Turn | null = null;
+    if (ownClaude) {
+      try {
+        const answer = await askOwnClaude(
+          identity.session,
+          q,
+          thread,
+          report(steps, installed),
+          (t) => {
+            text += t;
+            setBusy((b) => (b ? { ...b, text } : b));
+          },
+          ctl.signal,
+        );
+        final = { q, ...takeActions(answer), at: Date.now(), by: "claude" };
+      } catch (e) {
+        if ((e as Error).name === "AbortError") return;
+        final = { q, a: "", error: (e as Error).message || "Your Claude could not answer just now.", at: Date.now(), by: "claude" };
+      } finally {
+        abort.current = null;
+        setBusy(null);
+      }
+      setThread((t) => [...t, final!]);
+      setTimeout(() => input.current?.focus(), 0);
+      return;
+    }
     try {
       await ask(
         identity.session,
@@ -356,15 +507,59 @@ function Panel({ identity, open, installed: installedIds }: PluginContext) {
             : `Ask how anything works. ${name} helps you get set up and get work done.`
         }
         actions={
-          thread.length > 0 && !busy ? (
-            <Button icon={RotateCcw} onClick={() => setThread([])} title="Start a new conversation">
-              New conversation
-            </Button>
+          !busy && (convos.length > 0 || thread.length > 0) ? (
+            <div className="flex flex-wrap gap-2">
+              {convos.length > 0 && (
+                <Button icon={History} onClick={() => setListOpen((o) => !o)} aria-expanded={listOpen} title="Your past conversations">
+                  Conversations
+                </Button>
+              )}
+              {thread.length > 0 && (
+                <Button icon={RotateCcw} onClick={startNew} title="Start a new conversation">
+                  New conversation
+                </Button>
+              )}
+            </div>
           ) : undefined
         }
       />
 
       <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-5 py-6 md:px-8">
+        {listOpen && (
+          <Section label="Your conversations">
+            <ul className="max-w-4xl overflow-hidden rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)]">
+              {[...convos].sort((a, b) => b.at - a.at).map((c) => (
+                <li key={c.id} className="flex items-center gap-3 border-t border-[var(--line)] first:border-t-0">
+                  <button
+                    onClick={() => {
+                      setCurrentId(c.id);
+                      setListOpen(false);
+                    }}
+                    aria-current={c.id === currentId}
+                    className="flex min-w-0 flex-1 items-baseline gap-3 px-5 py-3 text-left hover:bg-[var(--raise)]"
+                  >
+                    <span className={`min-w-0 flex-1 truncate text-sm ${c.id === currentId ? "font-medium" : ""}`}>{titleOf(c)}</span>
+                    <span className="shrink-0 font-mono text-[11px] text-[var(--faint)]">
+                      {whenOf(c.at)}
+                    </span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setConvos((list) => list.filter((x) => x.id !== c.id));
+                      if (c.id === currentId) startNew();
+                    }}
+                    title="Delete this conversation"
+                    aria-label={`Delete "${titleOf(c)}"`}
+                    className="mr-3 rounded p-1.5 text-[var(--faint)] hover:bg-[var(--raise)] hover:text-[var(--fg)]"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-2 px-1 text-xs text-[var(--faint)]">Kept on this computer only. Deleting one removes it for good.</p>
+          </Section>
+        )}
         {!edition.demo && thread.length === 0 && !busy && (
           <section className="max-w-4xl space-y-5">
             {!signedIn && (
@@ -490,7 +685,10 @@ function Panel({ identity, open, installed: installedIds }: PluginContext) {
                   )}
                 </>
               ) : (
-                <Answer text={t.a} actions={t.actions} open={open} />
+                <>
+                  <Answer text={t.a} actions={t.actions} open={open} />
+                  {t.by === "claude" && <p className="mt-2 text-[11px] text-[var(--faint)]">Answered by your Claude</p>}
+                </>
               )}
             </Exchange>
           ))}
@@ -500,7 +698,9 @@ function Panel({ identity, open, installed: installedIds }: PluginContext) {
                 <Answer text={visible(busy.text)} open={open} />
               ) : (
                 <Waiting>
-                  {busy.waited > 40_000
+                  {ownClaude
+                    ? `Your Claude is thinking…`
+                    : busy.waited > 40_000
                     ? `${name} is waking up. This can take a minute or two.`
                     : `${name} is reading its documents…`}
                 </Waiting>
@@ -524,11 +724,35 @@ function Panel({ identity, open, installed: installedIds }: PluginContext) {
       {/* The hint sits above the input and the foot leaves room for the host's
           floating Suggest button at the bottom right. */}
       {canAsk && <div className="shrink-0 border-t border-[var(--line)] px-5 pt-3 pb-14 md:px-8">
-        <p className="mb-2 text-[11px] text-[var(--faint)]">
-          {story
-            ? `Anything that sends, signs or spends waits for your passkey. In this demo nothing leaves.`
-            : `${name} can't change your settings, see your keys or move money.`}
-        </p>
+        <div className="mb-2 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+          <p className="text-[11px] text-[var(--faint)]">
+            {story
+              ? `Anything that sends, signs or spends waits for your passkey. In this demo nothing leaves.`
+              : ownClaude
+              ? `Your Claude on this computer, on your own Claude plan. Ask it anything. It knows ${name}'s documents and can't open files or change anything.`
+              : `${name} can't change your settings, see your keys or move money.`}
+          </p>
+          {claude.found && signedIn && !scripted && (
+            <div role="radiogroup" aria-label="Who answers" className="flex shrink-0 items-center gap-1 text-[11px]">
+              <span className="mr-1 text-[var(--faint)]">Answer with</span>
+              {(["group", "claude"] as const).map((e) => (
+                <button
+                  key={e}
+                  role="radio"
+                  aria-checked={engine === e}
+                  disabled={!!busy}
+                  onClick={() => setEngine(e)}
+                  title={e === "claude" ? `Claude Code on this computer${claude.version ? ` (${claude.version})` : ""}` : `${name}'s own model`}
+                  className={`rounded-full border px-2.5 py-0.5 ${
+                    engine === e ? "border-[var(--line-strong)] text-[var(--fg)]" : "border-transparent text-[var(--faint)] hover:text-[var(--fg)]"
+                  }`}
+                >
+                  {e === "claude" ? "Your Claude" : name}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <form
           onSubmit={(e) => {
             e.preventDefault();

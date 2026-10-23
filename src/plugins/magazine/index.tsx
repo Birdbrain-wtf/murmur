@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Newspaper, RotateCw, ArrowUpRight } from "lucide-react";
+import { Newspaper, RotateCw, ArrowUpRight, Waypoints } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
 import { openInBrowser } from "../../identity/passkey";
@@ -15,15 +15,22 @@ import { PublicationPanel } from "../../demo/publication";
  * that IS the magazine, the plugin frames the live site inside the shell — the
  * issue is always current, and the design arrives intact. A thin Prism header
  * wraps it with the live issue number (from /api/health) and an escape hatch to
- * open it full-bleed in the browser.
+ * open it full-bleed in the browser. The Atlas (every piece drawn around the
+ * ideas it shares, flat or in 3D) is one tap away from the same header.
  */
 
 const MAG_URL = "https://zine.decent.partners";
+const VIEWS = {
+  issue: { url: MAG_URL, label: "the issue" },
+  atlas: { url: `${MAG_URL}/atlas`, label: "the Atlas" },
+} as const;
+type View = keyof typeof VIEWS;
 
 function Panel(_: PluginContext) {
   const [loaded, setLoaded] = useState(false);
   const [issue, setIssue] = useState<string | null>(null);
   const [nonce, setNonce] = useState(0);
+  const [view, setView] = useState<View>("issue");
   const frameRef = useRef<HTMLIFrameElement>(null);
 
   // Pull the live issue number so the header reflects what's actually published.
@@ -47,19 +54,32 @@ function Panel(_: PluginContext) {
     setNonce((n) => n + 1);
   }
 
+  function show(next: View) {
+    if (next === view) return;
+    setLoaded(false);
+    setView(next);
+  }
+
   return (
     <Page>
       <PageHeader
         icon={Newspaper}
         eyebrow="magazine"
         title={`Decent Magazine${issue ? ` · Issue Nº ${issue}` : ""}`}
-        lede="The live issue, without leaving the window."
+        lede={view === "atlas" ? "Every piece, drawn around the ideas it shares." : "The live issue, without leaving the window."}
         actions={
           <>
-            <Button icon={RotateCw} onClick={reload} title="Reload the issue">
+            <Button
+              icon={view === "atlas" ? Newspaper : Waypoints}
+              onClick={() => show(view === "atlas" ? "issue" : "atlas")}
+              title={view === "atlas" ? "Back to the issue" : "Every piece, mapped by the ideas it shares"}
+            >
+              {view === "atlas" ? "Issue" : "Atlas"}
+            </Button>
+            <Button icon={RotateCw} onClick={reload} title={`Reload ${VIEWS[view].label}`}>
               Reload
             </Button>
-            <Button trailing={ArrowUpRight} onClick={() => void openInBrowser(MAG_URL)}>
+            <Button trailing={ArrowUpRight} onClick={() => void openInBrowser(VIEWS[view].url)}>
               Open in browser
             </Button>
           </>
@@ -69,14 +89,14 @@ function Panel(_: PluginContext) {
       <div className="relative min-h-0 flex-1">
         {!loaded && (
           <div className="absolute inset-0 flex items-center justify-center">
-            <Waiting>Loading the issue</Waiting>
+            <Waiting>{view === "atlas" ? "Drawing the map" : "Loading the issue"}</Waiting>
           </div>
         )}
         <iframe
-          key={nonce}
+          key={`${view}-${nonce}`}
           ref={frameRef}
-          src={MAG_URL}
-          title="Decent Magazine"
+          src={VIEWS[view].url}
+          title={view === "atlas" ? "The Atlas" : "Decent Magazine"}
           onLoad={() => setLoaded(true)}
           className="h-full w-full border-0"
           style={{ opacity: loaded ? 1 : 0, transition: "opacity .4s ease" }}

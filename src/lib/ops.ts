@@ -264,7 +264,7 @@ export type Proposal = { status: "approved" | "declined" | "failed" | "expired" 
  * then simply runs out on the console).
  */
 export async function proposeChange(
-  kind: "incubation.place",
+  kind: "incubation.place" | "duty.close",
   target: string,
   change: Record<string, unknown>,
   opts: { onOpen?: (url: string) => void; stop?: AbortSignal } = {},

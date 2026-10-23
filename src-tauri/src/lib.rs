@@ -51,6 +51,9 @@ mod hub;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod netguard;
+// Answer with your own Claude: the member's own Claude Code, run as a child process.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+mod claude;
 
 // Calls: the window may use the microphone and camera.
 mod media;
@@ -59,7 +62,8 @@ mod media;
 pub fn run() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
-        .plugin(tauri_plugin_opener::init());
+        .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_notification::init());
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder.invoke_handler(tauri::generate_handler![
         secrets::secret_set,
@@ -80,7 +84,10 @@ pub fn run() {
         simplex::simplex_ws,
         simplex::simplex_invite_post,
         hub::hub_start,
-        hub::hub_send
+        hub::hub_send,
+        claude::claude_status,
+        claude::claude_ask,
+        claude::claude_stop
     ]);
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder
@@ -88,7 +95,8 @@ pub fn run() {
         .manage(node::NodeState(Default::default()))
         .manage(exchange::ExchangeState(Default::default()))
         .manage(simplex::SimplexState(Default::default()))
-        .manage(hub::HubState::default());
+        .manage(hub::HubState::default())
+        .manage(claude::ClaudeState::default());
     builder
         .setup(|_app| {
             media::allow_calls(_app);

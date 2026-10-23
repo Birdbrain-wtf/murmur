@@ -16,6 +16,9 @@ import {
   Users,
   PhoneIncoming,
   PhoneOff,
+  Bell,
+  BellOff,
+  AtSign,
 } from "lucide-react";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
@@ -44,6 +47,7 @@ import { Composer, Timeline } from "./conversation";
 import { messageContent, readMentions, roomPeople, type Mention } from "./mentions";
 import { AutoRecordStrip, useAutoRecord } from "./autorecord";
 import { acceptDirect, directRooms, listPeople, loaded, openDirect, ring, useRings, type Person } from "./people";
+import { LEVELS, alert, alertsOn, levelOf, looking, markRead, setAlerts, setLevel, shouldAlert, type Level } from "./notify";
 
 /**
  * Chat plugin — Matrix.
@@ -68,6 +72,9 @@ interface RoomLite {
   id: string;
   name: string;
   unread: number;
+  /** of those, how many mention this account */
+  mentions: number;
+  level: Level;
   /** someone has invited this account and it has not joined yet */
   invited: boolean;
 }
@@ -161,6 +168,13 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
   const [linking, setLinking] = useState(false);
   const [linked, setLinked] = useState<string | null>(null);
   const [linkError, setLinkError] = useState<string | null>(null);
+  const [myName, setMyName] = useState("");
+  const [savingName, setSavingName] = useState(false);
+  const [nameNote, setNameNote] = useState<{ tone: "ok" | "danger"; text: string } | null>(null);
+  const [alerts, setAlertsState] = useState(alertsOn);
+  const [alertNote, setAlertNote] = useState<string | null>(null);
+  const [roomLevel, setRoomLevel] = useState<Level>("all");
+  const sectionRef = useRef<HTMLElement>(null);
   const signedIn = !!(identity.signedIn && identity.session);
 
   const [call, setCall] = useState<CallState | null>(null);
@@ -236,7 +250,15 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
           refreshRooms(c, sdk);
         }
       });
-      c.on(sdk.RoomEvent.Timeline, () => refreshRooms(c, sdk));
+      c.on(sdk.RoomEvent.Timeline, (ev: any, room: any, toStart: boolean, _removed: boolean, data: any) => {
+        refreshRooms(c, sdk);
+        if (toStart || !data?.liveEvent || !c.isInitialSyncComplete?.()) return;
+        if (!shouldAlert(c, ev, selectedRoom.current)) return;
+        const who = room?.getMember?.(ev.getSender())?.name || shortSender(ev.getSender());
+        const direct = directRooms(c).has(room?.roomId);
+        void alert(direct ? who : `${who} in ${room?.name ?? "a room"}`, ev.getContent()?.body ?? "");
+      });
+      c.on(sdk.RoomEvent.Receipt, () => refreshRooms(c, sdk));
       // A new one-to-one room, or someone opening one with us, changes the People list.
       c.on(sdk.ClientEvent.AccountData, () => refreshRooms(c, sdk));
       c.on(sdk.RoomEvent.MyMembership, () => refreshRooms(c, sdk));
@@ -261,6 +283,8 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
         id: r.roomId,
         name: r.name || r.roomId,
         unread: r.getUnreadNotificationCount?.() ?? 0,
+        mentions: r.getUnreadNotificationCount?.("highlight") ?? 0,
+        level: levelOf(c, r.roomId),
         invited: r.getMyMembership?.() === "invite",
       }))
       .sort((a: RoomLite, b: RoomLite) => a.name.localeCompare(b.name));
@@ -406,6 +430,75 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
       detach?.();
     };
   }, [client, activeRoom]);
+
+  // Reading a room marks it read, here and in the member's other Matrix apps, but
+  // only while they can actually see it: the window in front and the room on screen.
+  useEffect(() => {
+    if (!client || !activeRoom || view !== "chat") return;
+    const room = activeRoom;
+    const read = () => {
+      if (looking() && (sectionRef.current?.offsetWidth ?? 0) > 0) void markRead(client, room).then(() => refreshRooms(client, sdk));
+    };
+    read();
+    window.addEventListener("focus", read);
+    document.addEventListener("visibilitychange", read);
+    return () => {
+      window.removeEventListener("focus", read);
+      document.removeEventListener("visibilitychange", read);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [client, activeRoom, view, conversation, events.length]);
+
+  useEffect(() => {
+    if (client && activeRoom) setRoomLevel(levelOf(client, activeRoom));
+  }, [client, activeRoom, rooms]);
+
+  async function chooseLevel(level: Level) {
+    if (!client || !activeRoom) return;
+    const was = roomLevel;
+    setRoomLevel(level);
+    try {
+      await setLevel(client, activeRoom, level);
+      refreshRooms(client, sdk);
+    } catch (err) {
+      setRoomLevel(was);
+      setError(err instanceof Error ? err.message : "Could not change notifications for this room.");
+    }
+  }
+
+  // The name other people see beside this account's messages, in this app and in
+  // any other Matrix app. The address itself never changes.
+  useEffect(() => {
+    if (view !== "account" || !client) return;
+    setNameNote(null);
+    client
+      .getProfileInfo(client.getUserId(), "displayname")
+      .then((p: any) => setMyName(p?.displayname ?? ""))
+      .catch(() => setMyName(client.getUser?.(client.getUserId())?.displayName ?? ""));
+  }, [view, client]);
+
+  async function saveName(e: React.FormEvent) {
+    e.preventDefault();
+    const name = myName.trim();
+    if (!client || !name || savingName) return;
+    setSavingName(true);
+    setNameNote(null);
+    try {
+      await client.setDisplayName(name);
+      setNameNote({ tone: "ok", text: `People now see you as ${name}.` });
+    } catch (err) {
+      setNameNote({ tone: "danger", text: err instanceof Error ? err.message : "The name did not save." });
+    } finally {
+      setSavingName(false);
+    }
+  }
+
+  async function toggleAlerts() {
+    setAlertNote(null);
+    const on = await setAlerts(!alerts);
+    setAlertsState(on);
+    if (!alerts && !on) setAlertNote("This computer did not allow alerts. Turn them on for the app in your system's notification settings, then try again.");
+  }
 
   // Start a direct conversation with someone by their Matrix address, so a
   // member can talk to the people they invite without leaving the app.
@@ -696,12 +789,19 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
                 className="chat-room prism-hover flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[var(--muted)] data-[active=true]:text-[var(--fg)]"
               >
                 <Hash className="h-3.5 w-3.5 shrink-0 text-[var(--faint)]" />
-                <span className="truncate">{r.name}</span>
-                {r.unread > 0 && (
-                  <span className="ml-auto">
-                    <span aria-label={`${r.unread} unread messages`} className="font-mono text-xs">{r.unread}</span>
-                  </span>
-                )}
+                <span className={`truncate ${r.unread > 0 ? "font-medium text-[var(--fg)]" : ""}`}>{r.name}</span>
+                <span className="ml-auto flex items-center gap-1.5">
+                  {r.level === "off" && <BellOff aria-label="Notifications off" className="h-3.5 w-3.5 text-[var(--faint)]" />}
+                  {r.level === "mentions" && <AtSign aria-label="Mentions only" className="h-3.5 w-3.5 text-[var(--faint)]" />}
+                  {r.unread > 0 && (
+                    <span
+                      aria-label={r.mentions > 0 ? `${r.unread} unread, ${r.mentions} mentioning you` : `${r.unread} unread messages`}
+                      className={`font-mono text-xs ${r.mentions > 0 ? "text-[var(--accent)]" : ""}`}
+                    >
+                      {r.mentions > 0 ? `@${r.unread}` : r.unread}
+                    </span>
+                  )}
+                </span>
               </button>
             ))}
             {rooms.length === 0 && (
@@ -720,7 +820,7 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
                 className="chat-room prism-hover flex w-full items-center gap-2 px-4 py-2 text-left text-sm text-[var(--muted)] data-[active=true]:text-[var(--fg)]"
               >
                 <User className="h-3.5 w-3.5 shrink-0 text-[var(--faint)]" />
-                <span className="truncate">{p.name}</span>
+                <span className={`truncate ${p.unread > 0 || p.invited ? "font-medium text-[var(--fg)]" : ""}`}>{p.name}</span>
                 <span className="ml-auto font-mono text-xs">
                   {opening === p.userId
                     ? "opening"
@@ -748,7 +848,7 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
           </div>
         </aside>
 
-        <section className="flex min-w-0 flex-1 flex-col">
+        <section ref={sectionRef} className="flex min-w-0 flex-1 flex-col">
           {view === "account" && <div className="chat-back p-3"><Button icon={ArrowLeft} onClick={() => { setConversation(false); setView("chat"); }}>Rooms</Button></div>}
           {view === "account" ? (
             <PageBody width="read">
@@ -757,6 +857,37 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
                   This address is yours on your {groupWord}'s chat server. Your passkey is how you get back
                   into it, so there is no password to keep.
                 </p>
+              </Section>
+              <Section label="your name in chat" icon={User}>
+                <p className="text-[13px] leading-relaxed text-[var(--muted)]">
+                  The name people see beside your messages, here and in any other Matrix app. Your address
+                  above stays the same, and so does your sign-in.
+                </p>
+                <form onSubmit={saveName} className="mt-3 flex items-center gap-2">
+                  <input
+                    value={myName}
+                    onChange={(e) => { setMyName(e.target.value); setNameNote(null); }}
+                    maxLength={64}
+                    placeholder="Alice"
+                    aria-label="Your name in chat"
+                    className={`${inputClass} min-w-0 flex-1`}
+                  />
+                  <Button type="submit" size="md" busy={savingName} disabled={!myName.trim()}>
+                    Save
+                  </Button>
+                </form>
+                {nameNote && <Notice tone={nameNote.tone}>{nameNote.text}</Notice>}
+              </Section>
+              <Section label="notifications" icon={Bell}>
+                <p className="text-[13px] leading-relaxed text-[var(--muted)]">
+                  Each room has its own setting: all messages, mentions only, or off. Change it from the bell
+                  at the top of the room. Your phone and other Matrix apps follow the same setting.
+                </p>
+                <label className="mt-3 flex items-center gap-2 text-[13px]">
+                  <input type="checkbox" checked={alerts} onChange={() => void toggleAlerts()} />
+                  Show an alert on this computer when a message arrives
+                </label>
+                {alertNote && <Notice tone="danger">{alertNote}</Notice>}
               </Section>
               <Section label="already on matrix" icon={Link2}>
                 <p className="text-[13px] leading-relaxed text-[var(--muted)]">
@@ -792,6 +923,19 @@ function LivePanel({ identity, switcher }: PluginContext & { switcher?: ReactNod
                 <span className="chat-back"><Button icon={ArrowLeft} aria-label="Back to rooms" onClick={() => setConversation(false)} /></span>
                 {activeDirect ? <User className="h-4 w-4 text-[var(--faint)]" /> : <Hash className="h-4 w-4 text-[var(--faint)]" />}
                 <span className="font-tight min-w-0 flex-1 truncate text-sm font-medium" title={activeDirect ?? undefined}>{activeName || "Group rooms"}</span>
+                {activeRoom && (
+                  <label className="flex items-center gap-1.5 text-[var(--muted)]" title="Notifications for this room">
+                    {roomLevel === "off" ? <BellOff className="h-4 w-4" aria-hidden="true" /> : <Bell className="h-4 w-4" aria-hidden="true" />}
+                    <select
+                      value={roomLevel}
+                      onChange={(e) => void chooseLevel(e.target.value as Level)}
+                      aria-label="Notifications for this room"
+                      className={`${inputClass} px-2 py-1 text-xs`}
+                    >
+                      {LEVELS.map((l) => <option key={l.id} value={l.id}>{l.label}</option>)}
+                    </select>
+                  </label>
+                )}
                 {call?.roomId !== activeRoom && activeRoom && (
                   <span className="ml-auto flex flex-wrap items-center gap-2">
                     {callers > 0 && (

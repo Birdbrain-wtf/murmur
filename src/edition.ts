@@ -84,6 +84,10 @@ export interface Edition {
    *  their mark. It is approved where members' own-key passkeys were made, which
    *  may not be the edition's door; editions without Seeds leave it out */
   signIn: { pair: string; approve: string; app: string; grant?: string; claim?: string };
+  /** where a member's own Claude gets its prompt and the passages from the
+   *  collective's documents (infra/services/room-agent/box). Absent, it is the
+   *  door's `<signIn.pair>/context`. Decent's is on Decent's own box, not Zo. */
+  context?: string;
   /** where this collective's invites land: `base` serves `/join` and records the
    *  invite (infra/services/app-updates/invite.ts), `update` is its signed update
    *  channel. Always the collective's own host, never a Zo address. An edition
@@ -192,6 +196,8 @@ const EDITIONS: Record<EditionId, Edition> = {
     privateChats: true,
     callRecorder: "@decent_recorder:decent.partners",
     joinable: ["murmur", "fttf"],
+    // Your Claude's passages come from Decent's own box (2026-10-21), not through Zo.
+    context: "https://decent.partners/app/context",
     // Decent's members, Decent's door: passkeys made at www.decent.partners. A
     // passkey belongs to the host that made it, so this is never Birdbrain's door.
     signIn: {

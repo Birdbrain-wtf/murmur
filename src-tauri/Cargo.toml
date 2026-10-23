@@ -1,6 +1,6 @@
 [package]
 name = "murmur"
-version = "0.7.1"
+version = "0.7.3"
 description = "Murmur and its editions: a plugin host over Matrix, Seeds and the group's memory"
 authors = ["Birdbrain"]
 edition = "2021"
@@ -18,6 +18,8 @@ tauri = { version = "2", features = [] }
 tauri-plugin-process = "2"
 # Opens the member's own browser for sign-in: a passkey belongs to a website, not to this window.
 tauri-plugin-opener = "2"
+# Desktop alerts for chat messages, each one under the member's own settings in Chat.
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
