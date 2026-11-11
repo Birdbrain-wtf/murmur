@@ -34,9 +34,23 @@ bun tauri build        # the desktop app (needs Rust and, on a Mac, Xcode comman
 
 [`BOOT.md`](BOOT.md) sets out how a new person goes from an invite to a member of a running network, and which of those steps work today.
 
+## Centralised today
+
+Murmur runs on your machine, but parts of the network it joins still run on servers Birdbrain operates. Here they are, so you can judge what you are trusting.
+
+| What | Who runs it | What it can do |
+| --- | --- | --- |
+| Sign-in and sessions ([birdbrain.wtf](https://birdbrain.wtf)) | Birdbrain | Refuse to sign you in. It never holds your keys |
+| Chat (a Matrix server for the group) | Birdbrain | Read group rooms, as any Matrix server can. Private chats go over SimpleX instead |
+| The SimpleX relay for private chats | Birdbrain | Delay or drop messages. It cannot read them |
+| The weekly call room | Birdbrain | See who joins and when |
+| Updates inside the app | Birdbrain, signed with Birdbrain's release key | Withhold an update. The app refuses one the key did not sign |
+| Joining on chain | One Birdbrain key adds each new member and pays the fee | Stop adding people. It can also remove a member, until the group's own governance holds that power |
+
+What does not depend on us: your notes stay on this device, your keys are made and kept on it, and the desktop app reads the chain itself through a light client rather than taking a server's word.
+
 ## Not yet
 
-- Updates inside the app. Murmur has no signed update channel yet, so a new version is a new download. When it has one, the signing key will be Birdbrain's.
 - Signing in with a passkey from inside the app. Today that happens on [birdbrain.wtf](https://birdbrain.wtf).
 - Connecting your own server, so notes and the group's memory live with you rather than with us.
 

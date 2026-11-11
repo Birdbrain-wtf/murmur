@@ -102,6 +102,10 @@ export interface Edition {
    *  proposals to change it: infra/services/access. Always the collective's own
    *  host. An edition without one shows its demo grid or nothing. */
   access?: { base: string };
+  /** where this collective serves its explorer (`/explorer`, `/api/explorer`):
+   *  infra/services/explorer. Always the collective's own host. The On chain
+   *  plugin reads it; members see names through the door's roster. */
+  explorer?: { base: string };
   /** where a member can share one note with this collective, by choice, signed
    *  with their check-in key (`/api/notes/share`): infra/services/notes-share.
    *  Notes stay on the device without it, and with it until the member shares. */
@@ -137,6 +141,11 @@ export interface Edition {
   /** the rail's order for this edition, top to bottom; plugins not named keep
    *  their own `order` after these */
   rail?: string[];
+  /** a plugin that leads the rail and opens the window, ahead of everything
+   *  else, the edition's hero (Brainrot's game, 2026-10-23) */
+  lead?: string;
+  /** the opening the window plays on launch (host/Intro.tsx); absent, none */
+  intro?: "murmuration";
 }
 
 const EDITIONS: Record<EditionId, Edition> = {
@@ -144,6 +153,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     id: "murmur",
     productName: "Birdbrain",
     instance: { slug: "birdbrain", name: "Birdbrain" },
+    intro: "murmuration",
     origin: "https://birdbrain.wtf",
     defaultSkin: "birdbrain",
     selfUpdate: true,
@@ -155,13 +165,14 @@ const EDITIONS: Record<EditionId, Edition> = {
     // set and the Journal is its reading surface (rich, 2026-10-16).
     custom: ["journal"],
     plugins: [...STARTER.filter((id) => id !== "magazine"), "pay"],
-    optional: ["swap", "exchange", "shield", "watch"],
+    optional: ["swap", "exchange", "shield", "watch", "onchain"],
     privateChats: true,
     exchangeMarket: "dex.birdbrain.wtf:7232",
     // served by Birdbrain's own box, never Zo (ADR 0076, 0078)
     asks: { base: "https://birdbrain.wtf" },
     home: "agent",
     joinable: ["decent"],
+    explorer: { base: "https://birdbrain.wtf" },
     signIn: {
       app: "murmur",
       pair: "https://birdbrain.wtf/api/chaos/app/pair",
@@ -187,7 +198,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     custom: ["magazine", "meet"],
     plugins: ["chat", "pay", "operations", "files", "invite"],
     // FTTF's channel, offered to add: it plays as a guest here (plugins/watch)
-    optional: ["swap", "watch"],
+    optional: ["swap", "watch", "onchain"],
     home: "agent",
     ops: { base: "https://www.decent.partners", member: true },
     invite: { base: "https://www.decent.partners", update: "https://www.decent.partners/app/update" },
@@ -200,6 +211,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     context: "https://decent.partners/app/context",
     // Decent's members, Decent's door: passkeys made at www.decent.partners. A
     // passkey belongs to the host that made it, so this is never Birdbrain's door.
+    explorer: { base: "https://www.decent.partners" },
     signIn: {
       app: "decent",
       pair: "https://www.decent.partners/api/app/pair",
@@ -226,9 +238,11 @@ function tailor(e: Edition, s: Shape) {
   const own = (e.custom ?? []).filter((p) => !made.includes(p));
   e.custom = [...made, ...own];
   e.plugins = s.plugins.filter((p) => !p.startsWith("made-"));
-  e.rail = ["agent", ...made, ...own, ...e.plugins];
+  // An edition's hero leads the rail and the window opens on it (Brainrot's game).
+  const lead = e.lead && own.includes(e.lead) ? [e.lead] : [];
+  e.rail = [...lead, "agent", ...made, ...own.filter((p) => !lead.includes(p)), ...e.plugins];
   e.call = { name: s.call.name, cadence: s.call.cadence, weekday: s.call.weekday, hour: s.call.hour, line: s.call.line };
-  e.home = "agent";
+  e.home = lead[0] ?? "agent";
 }
 
 const built = EDITIONS[(import.meta.env.VITE_EDITION as EditionId) ?? "decent"];

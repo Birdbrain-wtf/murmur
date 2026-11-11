@@ -3,7 +3,8 @@ import { SlidersHorizontal, Palette, Plus, X, Copy, Check, RotateCcw, KeyRound, 
 import { deleteSecret, listSecrets, persistent, saveSecret, validName, type SecretMeta } from "../lib/secrets";
 import { isTauri, getUpdateChannel, setUpdateChannel, type UpdateChannel } from "../host/useUpdater";
 import { Page, PageHeader, PageBody, Section, Card, List, Row, Status, Notice, Button, Field, Facts, inputClass } from "../ui";
-import { hasLightClient, removeCopy, setKeepCopy, useChain, useNode, type NodeStatus } from "../lib/chain";
+import { hasLightClient, removeCopy, setKeepCopy, useChain, useNode, type NodeChain, type NodeStatus } from "../lib/chain";
+import { hubClient, type Chain } from "../lib/hub";
 import type { MurmurModule, PluginContext } from "../host/types";
 import {
   useSkin,
@@ -43,6 +44,7 @@ function Panel({ instance, open }: PluginContext) {
         {isDemo && <YourWay open={open} />}
         {isDemo && <Billing />}
         <LedgerSection />
+        {hasLightClient && <KusamaSection />}
         <Secrets />
         <About />
       </PageBody>
@@ -516,10 +518,10 @@ function LedgerSection() {
 
 const mb = (n?: number | null) => (n == null ? "…" : n < 1e9 ? `${Math.round(n / 1e6)} MB` : `${(n / 1e9).toFixed(1)} GB`);
 
-function nodeLine(n: NodeStatus): string {
+function nodeLine(n: NodeStatus, off = "Off. Keep a whole copy here to make tampering harder."): string {
   switch (n.phase) {
     case "off":
-      return "Off. Keep a whole copy here to make tampering harder.";
+      return off;
     case "fetching":
       return n.fetchTotal ? `Downloading what it needs, ${mb(n.fetchedBytes)} of ${mb(n.fetchTotal)}…` : "Downloading what it needs…";
     case "waiting-for-power":
@@ -545,8 +547,18 @@ const PHASE: Record<NodeStatus["phase"], string> = {
   error: "stopped",
 };
 
-function KeepCopy() {
-  const [n, setN] = useNode();
+function KeepCopy({
+  chain = "birdbrain",
+  title = "Help keep the ledger",
+  off,
+  note = "It helps others check their copies. It only reads, never writes, runs only when plugged in and stops when the app quits. The app checks who made it before it runs.",
+}: {
+  chain?: NodeChain;
+  title?: string;
+  off?: string;
+  note?: string;
+}) {
+  const [n, setN] = useNode(3000, chain);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   if (!n) return null;
@@ -565,15 +577,15 @@ function KeepCopy() {
   return (
     <div className="space-y-3">
       <Row
-        title="Help keep the ledger"
+        title={title}
         status={
           <Status tone={n.phase === "error" ? "danger" : on ? "ok" : n.enabled ? "warn" : "idle"} pulse={n.phase === "syncing"}>
             {n.enabled ? PHASE[n.phase] : "off"}
           </Status>
         }
-        detail={nodeLine(n)}
+        detail={nodeLine(n, off)}
         action={
-          <Button busy={busy} onClick={() => void act(() => setKeepCopy(!n.enabled))}>
+          <Button busy={busy} onClick={() => void act(() => setKeepCopy(!n.enabled, chain))}>
             {n.enabled ? "Switch off" : "Switch on"}
           </Button>
         }
@@ -589,16 +601,85 @@ function KeepCopy() {
         />
       )}
       {err && <Notice tone="danger">{err}</Notice>}
-      <p className="text-xs leading-relaxed text-[var(--faint)]">
-        It helps others check their copies. It only reads, never writes, runs only when plugged in and stops when the
-        app quits. The app checks who made it before it runs.
-      </p>
+      <p className="text-xs leading-relaxed text-[var(--faint)]">{note}</p>
       {!n.enabled && n.version && (
-        <Button variant="quiet" disabled={busy} onClick={() => void act(removeCopy)}>
+        <Button variant="quiet" disabled={busy} onClick={() => void act(() => removeCopy(chain))}>
           Delete the copy and free {mb(n.diskBytes)}
         </Button>
       )}
     </div>
+  );
+}
+
+/** Follow a Kusama parachain through the light client and show the last block it checked. */
+function ParaCheck({ net, title, what }: { net: Chain; title: string; what: string }) {
+  const [on, setOn] = useState(false);
+  const [block, setBlock] = useState<number | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  useEffect(() => {
+    if (!on) return;
+    let sub: { unsubscribe(): void } | null = null;
+    let live = true;
+    hubClient(net)
+      .then((c) => {
+        if (!live) return;
+        sub = c.finalizedBlock$.subscribe({
+          next: (b) => setBlock(b.number),
+          error: (e) => setErr(String(e?.message ?? e)),
+        });
+      })
+      .catch((e) => setErr(String(e?.message ?? e)));
+    return () => {
+      live = false;
+      sub?.unsubscribe();
+    };
+  }, [on, net]);
+  return (
+    <Row
+      title={title}
+      status={
+        <Status tone={err ? "danger" : block != null ? "ok" : on ? "warn" : "idle"} pulse={on && block == null && !err}>
+          {err ? "stopped" : block != null ? "up to date" : on ? "connecting" : "not started"}
+        </Status>
+      }
+      detail={
+        err
+          ? `Can't follow it: ${err}`
+          : block != null
+            ? `${what} Checked here to block ${block.toLocaleString("en-GB")}.`
+            : on
+              ? `${what} Catching up with Kusama, which takes a minute the first time.`
+              : `${what} Follow it on this computer, taking no server's word for it.`
+      }
+      action={!on && <Button onClick={() => setOn(true)}>Start</Button>}
+    />
+  );
+}
+
+function KusamaSection() {
+  return (
+    <Section
+      label="Kreivo and Asset Hub"
+      icon={BookOpen}
+      lede="Membership and votes live on Kreivo, money on Asset Hub. Both sit on Kusama, and this app can check them itself, the same way it checks the ledger."
+    >
+      <List>
+        <ParaCheck net="kreivo" title="Kreivo" what="Who is a member of each collective, and how votes went." />
+        <ParaCheck net="kusama" title="Asset Hub" what="KSM and dUSD balances, and swaps." />
+        <KeepCopy
+          chain="kreivo"
+          title="Help keep Kreivo"
+          off="Off. Run a Kreivo node here, with a small copy of Kusama beside it. About 3 GB, and 15 minutes to catch up."
+          note="Parity's node program, checked against the fingerprint this app was built with before it runs. It keeps recent state, not the whole history, reads only, runs only when plugged in and stops when the app quits."
+        />
+        <KeepCopy
+          chain="asset-hub"
+          title="Help keep Asset Hub"
+          off="Off. Run an Asset Hub node here, with a small copy of Kusama beside it. About 4 GB, and 20 minutes to catch up."
+          note="The same program and the same rules as Kreivo's. With both on, each keeps its own copy of Kusama."
+        />
+      </List>
+    </Section>
   );
 }
 

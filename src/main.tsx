@@ -3,6 +3,7 @@ import { app } from "./edition";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./host/App";
+import { Intro } from "./host/Intro";
 import { IdentityProvider } from "./identity/useIdentity";
 import { BRAND_PRESETS, logoUrl, SkinProvider } from "./host/useSkin";
 import "./styles.css";
@@ -23,6 +24,7 @@ createRoot(document.getElementById("root")!).render(
     <SkinProvider>
       <IdentityProvider>
         <App />
+        {app.intro && <Intro kind={app.intro} logo={mark && logoUrl(mark)} />}
       </IdentityProvider>
     </SkinProvider>
   </StrictMode>,

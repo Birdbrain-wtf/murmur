@@ -1,6 +1,6 @@
 [package]
 name = "murmur"
-version = "0.7.4"
+version = "0.7.5"
 description = "Murmur and its editions: a plugin host over Matrix, Seeds and the group's memory"
 authors = ["Birdbrain"]
 edition = "2021"
@@ -31,6 +31,8 @@ tauri-plugin-updater = "2"
 minisign-verify = "0.2"
 flate2 = "1"
 base64 = "0.22"
+# Kreivo and Asset Hub copies: Parity's node program, checked against hashes pinned in node.rs.
+sha2 = "0.10"
 
 # Secrets and API keys live in the system's own secure store (the macOS Keychain,
 # Windows Credential Manager, the Linux desktop's keyring), never in the webview's

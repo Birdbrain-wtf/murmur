@@ -36,7 +36,7 @@ mod secrets {
 // The light client (ADR 0068). Desktop only for now: nothing here has been tried on a phone.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod chain;
-// Keep a copy: the optional full node, run as a child process (ADR 0068, step 2).
+// Keep a copy: the optional full nodes (Birdbrain, Kreivo, Asset Hub), each a child process (ADR 0068, step 2).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod node;
 // The exchange engine: Decred's DEX client, fetched, checked and run as a child process.
@@ -45,7 +45,7 @@ mod exchange;
 // Private messages: the SimpleX chat core, fetched, checked and run as a child process.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod simplex;
-// Asset Hub through a second light client, for Swap (KSM, or Paseo test money).
+// Asset Hub and Kreivo through a second light client: Swap, and membership read on this device.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 mod hub;
 
@@ -92,7 +92,7 @@ pub fn run() {
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
     let builder = builder
         .manage(chain::ChainState(Default::default(), Default::default()))
-        .manage(node::NodeState(Default::default()))
+        .manage(node::NodeState::default())
         .manage(exchange::ExchangeState(Default::default()))
         .manage(simplex::SimplexState(Default::default()))
         .manage(hub::HubState::default())
@@ -113,7 +113,12 @@ pub fn run() {
                     let dir = handle.path().app_data_dir().ok();
                     if let Some(d) = &dir {
                         let _ = std::fs::create_dir_all(d);
-                        *handle.state::<node::NodeState>().0.lock().unwrap() = Some(node::Node::start(d.clone()));
+                        let nodes_state = handle.state::<node::NodeState>();
+                        let mut nodes = nodes_state.0.lock().unwrap();
+                        for def in node::CHAINS {
+                            nodes.insert(def.key, node::Node::start(d.clone(), def));
+                        }
+                        drop(nodes);
                         *handle.state::<exchange::ExchangeState>().0.lock().unwrap() =
                             Some(exchange::Engine::start(d.clone(), handle.config().identifier.clone()));
                         *handle.state::<simplex::SimplexState>().0.lock().unwrap() = simplex::Core::start(d.clone(), &handle.config().identifier);
@@ -130,11 +135,11 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building the app")
         .run(|_handle, _event| {
-            // The full node is a child process: close its database cleanly on the way out.
+            // The full nodes are child processes: close their databases cleanly on the way out.
             #[cfg(not(any(target_os = "android", target_os = "ios")))]
             if let tauri::RunEvent::Exit = _event {
                 use tauri::Manager;
-                if let Some(n) = _handle.state::<node::NodeState>().0.lock().unwrap().as_ref() {
+                for n in _handle.state::<node::NodeState>().0.lock().unwrap().values() {
                     n.stop();
                 }
                 if let Some(e) = _handle.state::<exchange::ExchangeState>().0.lock().unwrap().as_ref() {

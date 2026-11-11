@@ -1,4 +1,4 @@
-import { ArrowDownLeft, ArrowUpRight, CheckCircle2, Coins, KeyRound, Lock, Route, Send, Wallet } from "lucide-react";
+import { ArrowDownLeft, ArrowUpRight, CheckCircle2, Coins, Cpu, KeyRound, Lightbulb, Lock, Palette, Route, Send, Users, Wallet, Wrench } from "lucide-react";
 import { edition, showcaseName } from "../edition";
 import { Card, Section } from "../ui";
 import { GROUPS } from "./groups";
@@ -8,7 +8,8 @@ import { inviteMonths } from "./invites";
 /**
  * What the sample member earns and pays, one payment at a time (invented demo
  * only). Every line traces to something in her record: an answer she gave, a
- * piece the group licensed, a session she led. Money moves when the record
+ * piece the group licensed, a session she led, a night her computer worked
+ * for the network. Money moves when the record
  * says the work is done, so nobody chases an invoice. A design shown with
  * sample figures, labelled as such: the contributor promise
  * (core/state/architecture/contributor-promise.md) means nobody is paid
@@ -58,6 +59,13 @@ const STREAMS: Stream[] = [
     months: [0, 0, 0, 0, 0, 38, 0, 0, 44, 0, 0, 51],
   },
   {
+    key: "compute",
+    label: "Her Mac, working overnight",
+    how: "Jobs from groups' agents run on her computer while it would sit idle, paid per job once a spot-check confirms it",
+    ink: "#e8743b",
+    months: [0, 0, 0, 0, 0, 0, 14, 18, 22, 19, 24, 26],
+  },
+  {
     key: "invites",
     label: "People she brought in",
     how: "A share of the Network Rate on answers given by people she invited, and the people they invited",
@@ -83,22 +91,66 @@ const MONTHS = ["N", "D", "J", "F", "M", "A", "M", "J", "J", "A", "S", "O"];
 const yearOf = (s: Stream) => s.months.reduce((a, b) => a + b, 0);
 const YEAR = STREAMS.reduce((n, s) => n + yearOf(s), 0);
 const PEAK = Math.max(...MONTHS.map((_, i) => STREAMS.reduce((n, s) => n + s.months[i], 0)));
-const THROUGH_NETWORK = yearOf(STREAMS[1]) + yearOf(STREAMS[2]);
+const streamYear = (k: string) => yearOf(STREAMS.find((s) => s.key === k)!);
+const THROUGH_NETWORK = streamYear("answers") + streamYear("licence") + streamYear("compute");
 
 const OUT: { what: string; amount: number; atSource?: boolean }[] = [
   { what: `Her ${home} membership, £5 a month`, amount: 60 },
   { what: "One question she asked the network, about mixing for radio", amount: 45 },
+  { what: "Electricity for her Mac's night work, May to October", amount: 25 },
   { what: "Network Rate: 10% of her network earnings, taken before they reached her", amount: Math.round(THROUGH_NETWORK / 9), atSource: true },
 ];
 
 const RECENT: { day: string; what: string; amount: number; stream: string }[] = [
   { day: "11 Oct", what: "Session at St Aidan's Primary, signed off", amount: 120, stream: "sessions" },
   { day: "9 Oct", what: "Answer: “How do you get a recording kit through safeguarding?”", amount: 54, stream: "answers" },
+  { day: "7 Oct", what: "Her Mac overnight: 412 jobs for groups' agents, all spot-checked", amount: 6, stream: "compute" },
   { day: "6 Oct", what: "Common Loaf's surplus, shared out", amount: 38, stream: "loaf" },
   { day: "3 Oct", what: "“A studio that travels”, licensed by Huxley to community radio", amount: 51, stream: "licence" },
   { day: "2 Oct", what: "Answer: “How did you raise for a roof with no bank account?”", amount: 72, stream: "answers" },
 ];
 const inkFor = (k: string) => STREAMS.find((s) => s.key === k)!.ink;
+
+/** What she brings to the network, each kind of resource tied to the streams it pays through. */
+const BRINGS: { icon: typeof Cpu; title: string; line: string; streams: string[] }[] = [
+  { icon: Lightbulb, title: "What she knows", line: "Questions matched to her record reach her. She answers and is paid.", streams: ["answers"] },
+  { icon: Wrench, title: "Her time and skills", line: "Sessions she leads and days on location, paid against what she signed.", streams: ["sessions", "halfmoon"] },
+  { icon: Palette, title: "What she makes", line: "Her pieces, licensed on terms members agreed.", streams: ["licence"] },
+  { icon: Cpu, title: "Her spare computer", line: "Groups' agents run on her Mac at night, so they don't rent from a big AI company.", streams: ["compute"] },
+  { icon: Users, title: "People she trusts", line: "A share of the 10% on answers from people she brought in.", streams: ["invites"] },
+];
+
+function Brings() {
+  return (
+    <Card>
+      <div className="font-tight text-sm font-medium">What she brings</div>
+      <p className="mt-1 text-[12px] leading-relaxed text-[var(--muted)]">
+        Not only answers. Anything useful she lends the network can come back to her, and each is noted in her record.
+      </p>
+      <ul className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-5">
+        {BRINGS.map((b) => {
+          const total = b.streams.reduce((n, k) => n + streamYear(k), 0);
+          return (
+            <li key={b.title} className="rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] px-3 py-3">
+              <div className="flex items-center gap-1.5">
+                {b.streams.map((k) => (
+                  <span key={k} className="h-2.5 w-2.5 rounded-full" style={{ background: inkFor(k) }} />
+                ))}
+                <b.icon className="ml-auto h-4 w-4 text-[var(--muted)]" />
+              </div>
+              <div className="font-tight mt-2 text-[13px] font-medium">{b.title}</div>
+              <div className="mt-1 text-[12px] leading-relaxed text-[var(--muted)]">{b.line}</div>
+              <div className="font-mono mt-2 text-[12px]">{gbp(total)} a year</div>
+            </li>
+          );
+        })}
+      </ul>
+      <p className="mt-3 text-[12px] leading-relaxed text-[var(--faint)]">
+        Could come next: storage for a group's archive, a spare room for sessions, kit she lends out.
+      </p>
+    </Card>
+  );
+}
 
 /** One £80 answer, followed from the asker's budget to Alice's wallet. */
 const TRAIL = [
@@ -194,6 +246,10 @@ export function IncomeSection() {
             ))}
           </div>
         </Card>
+
+        <div className="mt-4">
+          <Brings />
+        </div>
 
         <div className="mt-4">
           <Card>

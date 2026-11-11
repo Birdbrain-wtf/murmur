@@ -1,5 +1,6 @@
 /**
- * Asset Hub, read through the light client on this computer (src-tauri/src/hub.rs).
+ * Asset Hub and Kreivo, read through the light client on this computer
+ * (src-tauri/src/hub.rs). `kusama` and `kreivo` share one Kusama relay client.
  *
  * `hubClient(net)` is a polkadot-api client whose every message goes through the
  * Rust light client: `hub_send` carries a request in, and each answer comes back
@@ -16,7 +17,10 @@
 import { createClient, type PolkadotClient } from "polkadot-api";
 import type { JsonRpcProvider } from "polkadot-api/ws-provider/web";
 
+/** Swap's networks (Asset Hub). */
 export type Net = "kusama" | "paseo";
+/** Everything the light client follows: Swap's networks, and Kreivo. */
+export type Chain = Net | "kreivo";
 
 const isTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
@@ -25,12 +29,13 @@ export const hasHub = isTauri || import.meta.env.DEV;
 /** Whether what it reads was checked on this computer. */
 export const checked = isTauri;
 
-const PUBLIC_RPC: Record<Net, string> = {
+const PUBLIC_RPC: Record<Chain, string> = {
   kusama: "wss://kusama-asset-hub-rpc.polkadot.io",
   paseo: "wss://asset-hub-paseo-rpc.n.dwellir.com",
+  kreivo: "wss://kreivo.kippu.rocks",
 };
 
-function lightClientProvider(net: Net): JsonRpcProvider {
+function lightClientProvider(net: Chain): JsonRpcProvider {
   return (onMessage) => {
     let closed = false;
     let unlisten: (() => void) | null = null;
@@ -58,9 +63,9 @@ function lightClientProvider(net: Net): JsonRpcProvider {
   };
 }
 
-const clients = new Map<Net, Promise<PolkadotClient>>();
+const clients = new Map<Chain, Promise<PolkadotClient>>();
 
-export function hubClient(net: Net): Promise<PolkadotClient> {
+export function hubClient(net: Chain): Promise<PolkadotClient> {
   let c = clients.get(net);
   if (!c) {
     c = isTauri

@@ -64,12 +64,15 @@ export function useChain(everyMs = 3000): ChainStatus | null {
 }
 
 /**
- * Keep a copy: the optional full node (ADR 0068, step 2, src-tauri/src/node.rs).
+ * Keep a copy: the optional full nodes (ADR 0068, step 2, src-tauri/src/node.rs).
  *
- * Off by default. Switched on, the app fetches the node program from
- * birdbrain.wtf, checks it against Birdbrain's release key, and runs it while
- * the computer is on mains power. It holds every block and never makes one.
+ * One switch per chain, all off by default. `birdbrain`: the program comes from
+ * birdbrain.wtf, checked against Birdbrain's release key, and holds every block.
+ * `kreivo` and `asset-hub`: Parity's node program, checked against a hash this
+ * app was built with, holding recent state and a small Kusama relay copy. All run
+ * only on mains power and never make blocks.
  */
+export type NodeChain = "birdbrain" | "kreivo" | "asset-hub";
 export interface NodeStatus {
   enabled: boolean;
   phase: "off" | "fetching" | "waiting-for-power" | "starting" | "syncing" | "synced" | "error";
@@ -84,28 +87,28 @@ export interface NodeStatus {
   error?: string | null;
 }
 
-export async function nodeStatus(): Promise<NodeStatus | null> {
+export async function nodeStatus(chain: NodeChain = "birdbrain"): Promise<NodeStatus | null> {
   if (!isTauri) return null;
-  return invoke<NodeStatus>("node_status");
+  return invoke<NodeStatus>("node_status", { chain });
 }
 
-export async function setKeepCopy(enabled: boolean): Promise<NodeStatus> {
-  return invoke<NodeStatus>("node_set_enabled", { enabled });
+export async function setKeepCopy(enabled: boolean, chain: NodeChain = "birdbrain"): Promise<NodeStatus> {
+  return invoke<NodeStatus>("node_set_enabled", { enabled, chain });
 }
 
-export async function removeCopy(): Promise<NodeStatus> {
-  return invoke<NodeStatus>("node_remove");
+export async function removeCopy(chain: NodeChain = "birdbrain"): Promise<NodeStatus> {
+  return invoke<NodeStatus>("node_remove", { chain });
 }
 
-export function useNode(everyMs = 3000): [NodeStatus | null, (s: NodeStatus) => void] {
+export function useNode(everyMs = 3000, chain: NodeChain = "birdbrain"): [NodeStatus | null, (s: NodeStatus) => void] {
   const [s, setS] = useState<NodeStatus | null>(null);
   useEffect(() => {
     if (!isTauri) return;
     let live = true;
-    const tick = () => nodeStatus().then((v) => live && setS(v)).catch(() => {});
+    const tick = () => nodeStatus(chain).then((v) => live && setS(v)).catch(() => {});
     tick();
     const t = setInterval(tick, everyMs);
     return () => { live = false; clearInterval(t); };
-  }, [everyMs]);
+  }, [everyMs, chain]);
   return [s, setS];
 }

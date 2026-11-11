@@ -132,6 +132,14 @@ function steps(installed: string[]): Step[] {
       title: "Spending",
       body: `Then it's spent, in the open. ${name} has its own debit card, and a member can get one for a single job. Bob's only pays for bursaries. Every payment shows who, what for and the receipt.`,
     });
+  // The edition's hero, if it has one (Brainrot's game), gets its own card first after the agent.
+  if (edition.lead && has(edition.lead))
+    out.push({
+      target: edition.lead,
+      opens: edition.lead,
+      title: title(edition.lead),
+      body: `${getModule(edition.lead)!.tagline.replace(/\.+$/, "").replace(/[^?!]$/, "$&.")} Made for ${name}, and the first thing it opens on. Have a go.`,
+    });
   for (const id of installed.filter((i) => i.startsWith("made-") && has(i)))
     out.push({
       target: id,

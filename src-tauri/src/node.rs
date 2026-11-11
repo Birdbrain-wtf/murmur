@@ -1,4 +1,17 @@
-// Keep a copy: the optional full node (ADR 0068, step 2).
+// Keep a copy: the optional full nodes (ADR 0068, step 2).
+//
+// Three chains, each its own switch, all off by default:
+//   birdbrain  Birdbrain's chain. Program from birdbrain.wtf, signed with Birdbrain's key.
+//   kreivo     Kreivo, where every collective's membership and votes live.
+//   asset-hub  Kusama's Asset Hub, where KSM and dUSD sit.
+// Kreivo and Asset Hub run Parity's polkadot-omni-node, fetched from Parity's GitHub
+// release and checked against a SHA-256 pinned below, so the app's own release signature
+// covers which program may run. Each also fetches its chain's raw spec, pinned the same
+// way. They are Kusama parachains, so each carries a small embedded Kusama relay node
+// (warp sync, last 256 blocks and states) and keeps only recent state itself: a working
+// node that serves its peers, not an archive. Both on means two relay copies.
+//
+// What follows describes the Birdbrain one; the others differ only where noted.
 //
 // Off by default. Switched on in Settings, the app fetches the node program for this
 // computer from birdbrain.wtf (Birdbrain's own server, not Zo), checks it against
@@ -27,6 +40,87 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 const MANIFEST: &str = "https://birdbrain.wtf/app/node/latest.json";
+
+/// Where a chain's node program and spec come from.
+pub enum Source {
+    /// Birdbrain's: a manifest on birdbrain.wtf, each program signed with Birdbrain's key.
+    Signed,
+    /// Parity's omni-node at a fixed release, checked against pinned hashes.
+    Pinned {
+        version: &'static str,
+        /// (platform, url, sha256)
+        programs: &'static [(&'static str, &'static str, &'static str)],
+        spec: (&'static str, &'static str),
+        bootnodes: &'static [&'static str],
+    },
+}
+
+pub struct Def {
+    pub key: &'static str,
+    dir: &'static str,
+    exe: &'static str,
+    source: Source,
+}
+
+const OMNI_PROGRAMS: &[(&str, &str, &str)] = &[
+    (
+        "linux-x86_64",
+        "https://github.com/paritytech/polkadot-sdk/releases/download/polkadot-stable2609-1/polkadot-omni-node",
+        "a30cc63c7794eec8c22d92bbb103c6757b8dcab6c6f550eb480bec0edd5716cb",
+    ),
+    (
+        "darwin-aarch64",
+        "https://github.com/paritytech/polkadot-sdk/releases/download/polkadot-stable2609-1/polkadot-omni-node-aarch64-apple-darwin",
+        "2cd1ddb414bc6bba46be19052ff8f4b95172761ff8b465d8c5a506e9c9b4f0ce",
+    ),
+];
+
+pub const CHAINS: &[Def] = &[
+    Def { key: "birdbrain", dir: "node", exe: "seeds-node-", source: Source::Signed },
+    Def {
+        key: "kreivo",
+        dir: "node-kreivo",
+        exe: "polkadot-omni-node-",
+        source: Source::Pinned {
+            version: "stable2609-1",
+            programs: OMNI_PROGRAMS,
+            spec: (
+                "https://raw.githubusercontent.com/virto-network/kreivo/d6271190709b61e75c3a257595eb60c786e8a7d9/chain-spec-generator/src/spec/live/kreivo_kusama_chainspec.json",
+                "d09b0ce837e04ecc1f029fcd5efb41624557995af664b7313df57fdcd23e05fb",
+            ),
+            // Virto's spec lists only 127.0.0.1; these are public Kreivo nodes.
+            bootnodes: &[
+                "/ip4/104.206.91.19/tcp/30333/p2p/12D3KooWP1mhED5zhk5ghkdYH1TSEVTVX2s2hSADz67oLfiYeeXF",
+                "/ip4/104.206.93.154/tcp/30333/p2p/12D3KooWP1mhED5zhk5ghkdYH1TSEVTVX2s2hSADz67oLfiYeeXF",
+                "/ip4/63.250.55.66/tcp/30333/p2p/12D3KooWNpsPXUKvg9Gk9te54r4xodSPzVgLUkrfhDPpYXNepCb7",
+            ],
+        },
+    },
+    Def {
+        key: "asset-hub",
+        dir: "node-asset-hub",
+        exe: "polkadot-omni-node-",
+        source: Source::Pinned {
+            version: "stable2609-1",
+            programs: OMNI_PROGRAMS,
+            spec: (
+                "https://raw.githubusercontent.com/paritytech/polkadot-sdk/polkadot-stable2609-1/cumulus/parachains/chain-specs/asset-hub-kusama.json",
+                "4f162192eedfdf1b142f156d24ffd321c2d91dc61b509b50b95e4d2f3b4327e0",
+            ),
+            bootnodes: &[],
+        },
+    },
+];
+
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn def(key: &str) -> Option<&'static Def> {
+    CHAINS.iter().find(|d| d.key == key)
+}
+
+fn sha256_hex(data: &[u8]) -> String {
+    use sha2::Digest;
+    sha2::Sha256::digest(data).iter().map(|b| format!("{b:02x}")).collect()
+}
 // Birdbrain's release key (id 7B2225DE066A9737).
 // The node is the chain's program, so every edition checks it against the chain's key.
 const PUBKEY: &str = "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDdCMjIyNURFMDY2QTk3MzcKUldRM2wyb0czaVVpZXpORXY1TG4rUFA5RVhFN2Raa3IrU09FUnJJSmx2enZaWWRtVlROQk9RU28K";
@@ -66,6 +160,7 @@ struct Running {
 }
 
 pub struct Node {
+    def: &'static Def,
     dir: PathBuf,
     status: Mutex<NodeStatus>,
     running: Mutex<Option<Running>>,
@@ -73,7 +168,8 @@ pub struct Node {
     crashes: Mutex<u32>,
 }
 
-pub struct NodeState(pub Mutex<Option<Arc<Node>>>);
+#[derive(Default)]
+pub struct NodeState(pub Mutex<std::collections::HashMap<&'static str, Arc<Node>>>);
 
 fn platform() -> String {
     let os = match std::env::consts::OS {
@@ -83,9 +179,9 @@ fn platform() -> String {
     format!("{os}-{}", std::env::consts::ARCH)
 }
 
-fn exe_name(version: &str) -> String {
+fn exe_name(def: &Def, version: &str) -> String {
     let ext = if cfg!(windows) { ".exe" } else { "" };
-    format!("seeds-node-{version}{ext}")
+    format!("{}{version}{ext}", def.exe)
 }
 
 /// Mains power, or no battery at all. Windows is assumed plugged in until it is checked.
@@ -131,11 +227,13 @@ fn dir_size(p: &Path) -> u64 {
         .sum()
 }
 
-/// The database's write-ahead journal: the *.log files under db/chains/<id>/db/full.
+/// The database's write-ahead journal: the *.log files under db/chains/<id>/db/full
+/// (and db/polkadot/chains/<id>/db/full for a parachain's embedded relay node).
 fn journal_size(db: &Path) -> u64 {
-    let Ok(chains) = std::fs::read_dir(db.join("chains")) else { return 0 };
-    chains
-        .flatten()
+    [db.join("chains"), db.join("polkadot/chains")]
+        .iter()
+        .filter_map(|p| std::fs::read_dir(p).ok())
+        .flat_map(|rd| rd.flatten())
         .filter_map(|c| std::fs::read_dir(c.path().join("db/full")).ok())
         .flat_map(|rd| rd.flatten())
         .filter(|e| e.path().extension().map(|x| x == "log").unwrap_or(false))
@@ -179,10 +277,11 @@ fn verify(data: &[u8], signature_b64: &str) -> Result<(), String> {
 }
 
 impl Node {
-    pub fn start(data_dir: PathBuf) -> Arc<Node> {
-        let dir = data_dir.join("node");
+    pub fn start(data_dir: PathBuf, def: &'static Def) -> Arc<Node> {
+        let dir = data_dir.join(def.dir);
         let _ = std::fs::create_dir_all(&dir);
         let node = Arc::new(Node {
+            def,
             dir,
             status: Mutex::new(NodeStatus { phase: "off".into(), ..Default::default() }),
             running: Mutex::new(None),
@@ -201,7 +300,7 @@ impl Node {
         }
         let sup = node.clone();
         std::thread::Builder::new()
-            .name("full-node".into())
+            .name(format!("full-node-{}", def.key))
             .spawn(move || loop {
                 sup.tick();
                 std::thread::sleep(Duration::from_secs(5));
@@ -224,7 +323,7 @@ impl Node {
             .flatten()
             .filter_map(|e| {
                 let n = e.file_name().to_string_lossy().to_string();
-                let v = n.strip_prefix("seeds-node-")?.trim_end_matches(".exe").to_string();
+                let v = n.strip_prefix(self.def.exe)?.trim_end_matches(".exe").to_string();
                 let t = e.metadata().ok()?.modified().ok()?;
                 (!v.ends_with(".part")).then_some((t, v))
             })
@@ -283,7 +382,7 @@ impl Node {
             *f = true;
         }
         std::thread::Builder::new()
-            .name("full-node-fetch".into())
+            .name(format!("full-node-fetch-{}", self.def.key))
             .spawn(move || {
                 let r = self.fetch();
                 *self.fetching.lock().unwrap() = false;
@@ -311,9 +410,103 @@ impl Node {
             let _ = rustls::crypto::ring::default_provider().install_default();
         }
         let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(600))
+            .timeout(Duration::from_secs(1200))
             .build()
             .map_err(|e| e.to_string())?;
+        match &self.def.source {
+            Source::Signed => self.fetch_signed(&client),
+            Source::Pinned { version, programs, spec, .. } => self.fetch_pinned(&client, version, programs, *spec),
+        }
+    }
+
+    fn download(&self, client: &reqwest::blocking::Client, url: &str, progress: bool) -> Result<Vec<u8>, String> {
+        let mut resp = client
+            .get(url)
+            .send()
+            .and_then(|r| r.error_for_status())
+            .map_err(|e| format!("couldn't fetch {url}: {e}"))?;
+        let total = resp.content_length();
+        if progress {
+            self.status.lock().unwrap().fetch_total = total;
+        }
+        let mut out = Vec::with_capacity(total.unwrap_or(0) as usize);
+        let mut buf = vec![0u8; 256 * 1024];
+        loop {
+            let n = resp.read(&mut buf).map_err(|e| e.to_string())?;
+            if n == 0 {
+                break;
+            }
+            out.extend_from_slice(&buf[..n]);
+            if progress {
+                self.status.lock().unwrap().fetched_bytes = Some(out.len() as u64);
+            }
+        }
+        Ok(out)
+    }
+
+    /// Put a checked program in place: written to .part, made runnable, then renamed, and
+    /// older versions removed.
+    fn install(&self, version: &str, bin: &[u8]) -> Result<(), String> {
+        let target = self.dir.join(exe_name(self.def, version));
+        let part = self.dir.join(format!("{}.part", exe_name(self.def, version)));
+        std::fs::write(&part, bin).map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
+        }
+        std::fs::rename(&part, &target).map_err(|e| e.to_string())?;
+        // Older programs go once the new one is in place. A running one is restarted on
+        // the new version by tick().
+        if let Ok(rd) = std::fs::read_dir(&self.dir) {
+            for e in rd.flatten() {
+                let n = e.file_name().to_string_lossy().to_string();
+                // Unix keeps a running program alive after its file goes; elsewhere the
+                // delete fails quietly and the next launch tidies it.
+                if n.starts_with(self.def.exe) && n != exe_name(self.def, version) {
+                    let _ = std::fs::remove_file(e.path());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Parity's program and the chain's spec, each checked against its pinned SHA-256
+    /// before it is kept. The spec is fetched first: it is small, and without it the
+    /// program is no use.
+    fn fetch_pinned(
+        &self,
+        client: &reqwest::blocking::Client,
+        version: &str,
+        programs: &[(&str, &str, &str)],
+        spec: (&str, &str),
+    ) -> Result<String, String> {
+        let spec_path = self.dir.join("spec.json");
+        let have_spec = std::fs::read(&spec_path).map(|b| sha256_hex(&b) == spec.1).unwrap_or(false);
+        if !have_spec {
+            let body = self.download(client, spec.0, false)?;
+            if sha256_hex(&body) != spec.1 {
+                return Err("the chain spec isn't the one this app was built to trust".into());
+            }
+            std::fs::write(&spec_path, &body).map_err(|e| e.to_string())?;
+        }
+        if self.installed().as_deref() == Some(version) {
+            return Ok(version.to_string());
+        }
+        let p = platform();
+        let (_, url, sha) = programs
+            .iter()
+            .find(|(plat, _, _)| *plat == p)
+            .ok_or_else(|| format!("no node program for {p} yet"))?;
+        let bin = self.download(client, url, true)?;
+        if sha256_hex(&bin) != *sha {
+            return Err("the node program isn't the one this app was built to trust".into());
+        }
+        self.install(version, &bin)?;
+        Ok(version.to_string())
+    }
+
+    fn fetch_signed(&self, client: &reqwest::blocking::Client) -> Result<String, String> {
         let manifest: Value = client
             .get(MANIFEST)
             .send()
@@ -335,65 +528,50 @@ impl Node {
             return Err("the node manifest points somewhere other than birdbrain.wtf".into());
         }
 
-        let mut resp = client
-            .get(url)
-            .send()
-            .and_then(|r| r.error_for_status())
-            .map_err(|e| format!("couldn't fetch the node program: {e}"))?;
-        let total = resp.content_length();
-        self.status.lock().unwrap().fetch_total = total;
-        let mut gz = Vec::with_capacity(total.unwrap_or(0) as usize);
-        let mut buf = vec![0u8; 256 * 1024];
-        loop {
-            let n = resp.read(&mut buf).map_err(|e| e.to_string())?;
-            if n == 0 {
-                break;
-            }
-            gz.extend_from_slice(&buf[..n]);
-            self.status.lock().unwrap().fetched_bytes = Some(gz.len() as u64);
-        }
+        let gz = self.download(client, url, true)?;
         verify(&gz, signature)?;
 
         let mut bin = Vec::new();
         flate2::read::GzDecoder::new(&gz[..]).read_to_end(&mut bin).map_err(|e| e.to_string())?;
-        let target = self.dir.join(exe_name(&version));
-        let part = self.dir.join(format!("{}.part", exe_name(&version)));
-        std::fs::write(&part, &bin).map_err(|e| e.to_string())?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&part, std::fs::Permissions::from_mode(0o755)).map_err(|e| e.to_string())?;
-        }
-        std::fs::rename(&part, &target).map_err(|e| e.to_string())?;
-        // Older programs go once the new one is in place. A running one is restarted on
-        // the new version by tick().
-        if let Ok(rd) = std::fs::read_dir(&self.dir) {
-            for e in rd.flatten() {
-                let n = e.file_name().to_string_lossy().to_string();
-                // Unix keeps a running program alive after its file goes; elsewhere the
-                // delete fails quietly and the next launch tidies it.
-                if n.starts_with("seeds-node-") && n != exe_name(&version) {
-                    let _ = std::fs::remove_file(e.path());
-                }
-            }
-        }
+        self.install(&version, &bin)?;
         Ok(version)
     }
 
     fn spawn(&self, version: &str) -> Result<Running, String> {
         let spec = self.dir.join("spec.json");
-        std::fs::write(&spec, crate::chain::SPEC).map_err(|e| e.to_string())?;
+        if let Source::Signed = self.def.source {
+            std::fs::write(&spec, crate::chain::SPEC).map_err(|e| e.to_string())?;
+        }
         let port = free_port().ok_or("no free port on this computer")?;
         let log = std::fs::File::create(self.dir.join("node.log")).map_err(|e| e.to_string())?;
-        let child = Command::new(self.dir.join(exe_name(version)))
-            .arg("--chain").arg(&spec)
+        let mut cmd = Command::new(self.dir.join(exe_name(self.def, version)));
+        cmd.arg("--chain").arg(&spec)
             .arg("--base-path").arg(self.dir.join("db"))
-            .args(["--name", "keep-a-copy"])
+            .args(["--name", "keep-a-copy"]);
+        match &self.def.source {
             // Every block, and the state of the last 256: the record without the archive's weight.
-            .args(["--sync", "full", "--blocks-pruning", "archive-canonical", "--state-pruning", "256"])
-            // Peers on any free port, RPC on the loopback only and read-only.
-            .args(["--port", "0", "--rpc-port", &port.to_string(), "--rpc-methods", "safe", "--rpc-cors", "none"])
-            .args(["--no-telemetry", "--no-mdns", "--no-prometheus"])
+            Source::Signed => {
+                cmd.args(["--sync", "full", "--blocks-pruning", "archive-canonical", "--state-pruning", "256"]);
+            }
+            // A Kusama parachain: warp to the tip, keep the last 256 blocks and states.
+            Source::Pinned { bootnodes, .. } => {
+                if !bootnodes.is_empty() {
+                    cmd.arg("--bootnodes").args(bootnodes.iter());
+                }
+                cmd.args(["--sync", "warp", "--blocks-pruning", "256", "--state-pruning", "256"]);
+            }
+        }
+        // Peers on any free port, RPC on the loopback only and read-only.
+        cmd.args(["--port", "0", "--rpc-port", &port.to_string(), "--rpc-methods", "safe", "--rpc-cors", "none"])
+            .args(["--no-telemetry", "--no-mdns", "--no-prometheus"]);
+        if let Source::Pinned { .. } = self.def.source {
+            // The embedded Kusama relay node: same shape, its RPC on another loopback port.
+            let relay_port = free_port().ok_or("no free port on this computer")?;
+            cmd.args(["--", "--chain", "kusama", "--sync", "warp", "--blocks-pruning", "256", "--state-pruning", "256"])
+                .args(["--port", "0", "--rpc-port", &relay_port.to_string(), "--rpc-methods", "safe", "--rpc-cors", "none"])
+                .args(["--no-telemetry", "--no-mdns", "--no-prometheus"]);
+        }
+        let child = cmd
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(log)
@@ -477,7 +655,7 @@ impl Node {
             }
         } else if !want && is_running {
             self.stop();
-        } else if is_running && journal_size(&self.dir.join("db")) > JOURNAL_LIMIT {
+        } else if is_running && journal_size(&self.dir.join("db")) > JOURNAL_LIMIT && self.may_restart_for_journal() {
             // Not a crash: the next tick starts it again on a clean journal.
             self.stop();
         }
@@ -528,6 +706,17 @@ impl Node {
         s.disk_bytes = Some(dir_size(&self.dir.join("db")));
     }
 
+    /// Birdbrain's node resumes a full sync after a restart. A Kusama parachain's relay
+    /// node warp syncs, and a restart mid-warp starts the warp again from nothing, while
+    /// the warp itself writes past the journal limit: restarting then would loop for
+    /// ever (seen 2026-11-11). So those wait until they have caught up.
+    fn may_restart_for_journal(&self) -> bool {
+        match self.def.source {
+            Source::Signed => true,
+            Source::Pinned { .. } => self.status.lock().unwrap().phase == "synced",
+        }
+    }
+
     fn set_phase(&self, phase: &str, mains: bool) {
         let mut s = self.status.lock().unwrap();
         s.phase = phase.into();
@@ -535,24 +724,30 @@ impl Node {
     }
 }
 
+fn node_for(state: &NodeState, chain: Option<String>) -> Result<Arc<Node>, String> {
+    let key = chain.unwrap_or_else(|| "birdbrain".into());
+    state.0.lock().unwrap().get(key.as_str()).cloned().ok_or_else(|| format!("the {key} node isn't ready yet"))
+}
+
+/// `chain` is birdbrain (the default), kreivo or asset-hub.
 #[tauri::command]
-pub fn node_status(state: tauri::State<'_, NodeState>) -> NodeStatus {
-    match state.0.lock().unwrap().as_ref() {
-        Some(n) => n.status(),
-        None => NodeStatus { phase: "off".into(), on_mains: on_mains(), ..Default::default() },
+pub fn node_status(state: tauri::State<'_, NodeState>, chain: Option<String>) -> NodeStatus {
+    match node_for(&state, chain) {
+        Ok(n) => n.status(),
+        Err(_) => NodeStatus { phase: "off".into(), on_mains: on_mains(), ..Default::default() },
     }
 }
 
 #[tauri::command]
-pub fn node_set_enabled(state: tauri::State<'_, NodeState>, enabled: bool) -> Result<NodeStatus, String> {
-    let n = state.0.lock().unwrap().clone().ok_or("the node isn't ready yet")?;
+pub fn node_set_enabled(state: tauri::State<'_, NodeState>, chain: Option<String>, enabled: bool) -> Result<NodeStatus, String> {
+    let n = node_for(&state, chain)?;
     n.set_enabled(enabled)?;
     Ok(n.status())
 }
 
 #[tauri::command]
-pub fn node_remove(state: tauri::State<'_, NodeState>) -> Result<NodeStatus, String> {
-    let n = state.0.lock().unwrap().clone().ok_or("the node isn't ready yet")?;
+pub fn node_remove(state: tauri::State<'_, NodeState>, chain: Option<String>) -> Result<NodeStatus, String> {
+    let n = node_for(&state, chain)?;
     n.remove()?;
     Ok(n.status())
 }
@@ -561,14 +756,15 @@ pub fn node_remove(state: tauri::State<'_, NodeState>) -> Result<NodeStatus, Str
 mod tests {
     use super::*;
 
-    // Against the real thing: fetches from birdbrain.wtf, checks, runs, follows the chain.
+    // Against the real thing: fetches, checks, runs, follows the chain. NODE_CHAIN picks
+    // birdbrain (default), kreivo or asset-hub; the Kusama ones take hours and many GB.
     // cargo test --lib node -- --ignored --nocapture
     #[test]
     #[ignore]
     fn keeps_a_copy_of_the_live_chain() {
         let dir = std::env::temp_dir().join(format!("murmur-node-test-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let node = Node::start(dir.clone());
+        let node = Node::start(dir.clone(), def(&std::env::var("NODE_CHAIN").unwrap_or_else(|_| "birdbrain".into())).unwrap());
         // Stops the child even when an assertion below fails.
         struct Guard(Arc<Node>);
         impl Drop for Guard {
@@ -611,7 +807,7 @@ mod tests {
                 );
                 break;
             }
-            assert!(t0.elapsed() < Duration::from_secs(1800), "not synced in 30 minutes");
+            assert!(t0.elapsed() < Duration::from_secs(4 * 3600), "not synced in 4 hours");
             std::thread::sleep(Duration::from_millis(500));
         }
         assert!(seen_fetch, "never fetched the program");
@@ -624,8 +820,22 @@ mod tests {
 
         node.remove().unwrap();
         assert!(node.installed().is_none());
-        assert!(!dir.join("node/db").exists());
+        assert!(!dir.join(node.def.dir).join("db").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn pinned_hashes_are_well_formed() {
+        for d in CHAINS {
+            if let Source::Pinned { programs, spec, .. } = &d.source {
+                for (_, url, sha) in programs.iter().chain(std::iter::once(&("", spec.0, spec.1))) {
+                    assert!(url.starts_with("https://"), "{url}");
+                    assert_eq!(sha.len(), 64, "{url}");
+                    assert!(sha.chars().all(|c| c.is_ascii_hexdigit()), "{url}");
+                }
+            }
+        }
+        assert_eq!(sha256_hex(b"abc"), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
     }
 
     #[test]

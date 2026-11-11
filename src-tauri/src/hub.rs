@@ -1,18 +1,25 @@
-// Asset Hub, checked on this device, for Swap.
+// Asset Hub and Kreivo, checked on this device.
 //
-// A second smoldot client beside the Birdbrain one (chain.rs): the relay chain and its
-// Asset Hub, so a quote and a swap are read from proofs this computer checked, never
-// from a server's word. Two networks: `kusama` (real KSM) and `paseo` (test money).
-// Each starts the first time the page asks for it and runs until the app quits.
+// A second smoldot client beside the Birdbrain one (chain.rs): a relay chain and the
+// parachains on it, so a quote, a swap or a membership count is read from proofs this
+// computer checked, never from a server's word. Three names:
+//   `kusama`  Kusama's Asset Hub (real KSM, Swap)
+//   `kreivo`  Kreivo, where each collective's membership and votes live
+//   `paseo`   Paseo's Asset Hub (test money)
+// `kusama` and `kreivo` share one Kusama relay client, so following both costs one
+// relay sync, not two. Each starts the first time a page asks for it and runs until
+// the app quits.
 //
 // Unlike chain.rs this is a pipe, not a set of one-shot calls: the page runs a full
 // JSON-RPC client (polkadot-api, src/lib/hub.ts), which needs subscriptions to follow
 // blocks and watch a transaction. `hub_send` passes a message in; every answer comes
-// back as a `hub` event carrying the network and the raw message.
+// back as a `hub` event carrying the name and the raw message.
 //
-// Specs are bundled (chains/ksmcc3*.json, chains/paseo*.json, refreshed by
-// lab/swap/fetch-specs.ts). The relay spec's checkpoint lets a cold start warp sync,
-// and the relay database is kept every 5 minutes so a warm start skips even that.
+// Specs are bundled. The relay and Asset Hub ones come from lab/swap/fetch-specs.ts;
+// the relay spec's checkpoint lets a cold start warp sync, and the relay database is
+// kept every 5 minutes so a warm start skips even that. chains/kreivo.json is a light
+// spec made from Virto's published chain spec: genesis state root read from block 0,
+// and public Kreivo nodes as bootnodes (Virto's own spec lists only 127.0.0.1).
 
 use std::{
     collections::HashMap,
@@ -29,21 +36,20 @@ use smoldot_light::{ChainId, Client};
 use crate::netguard::Guarded;
 use tauri::Emitter;
 
-struct Spec {
-    relay: &'static str,
-    para: &'static str,
+/// The relay a name rides on, and its parachain's spec.
+fn para_spec(net: &str) -> Option<(&'static str, &'static str)> {
+    match net {
+        "kusama" => Some(("kusama", include_str!("../chains/ksmcc3_asset_hub.json"))),
+        "kreivo" => Some(("kusama", include_str!("../chains/kreivo.json"))),
+        "paseo" => Some(("paseo", include_str!("../chains/paseo_asset_hub.json"))),
+        _ => None,
+    }
 }
 
-fn spec(net: &str) -> Option<Spec> {
-    match net {
-        "kusama" => Some(Spec {
-            relay: include_str!("../chains/ksmcc3.json"),
-            para: include_str!("../chains/ksmcc3_asset_hub.json"),
-        }),
-        "paseo" => Some(Spec {
-            relay: include_str!("../chains/paseo.json"),
-            para: include_str!("../chains/paseo_asset_hub.json"),
-        }),
+fn relay_spec(relay: &str) -> Option<&'static str> {
+    match relay {
+        "kusama" => Some(include_str!("../chains/ksmcc3.json")),
+        "paseo" => Some(include_str!("../chains/paseo.json")),
         _ => None,
     }
 }
@@ -54,21 +60,16 @@ struct Message {
     msg: String,
 }
 
-pub struct Hub {
+/// One relay chain in its own smoldot client. Parachains are added to the same client.
+pub struct Relay {
     client: Mutex<Client<Guarded, ()>>,
-    para: ChainId,
+    id: ChainId,
 }
 
-impl Hub {
-    /// Start the relay chain and its Asset Hub. `emit` receives every message the Asset
-    /// Hub's JSON-RPC server sends back.
-    pub fn start(
-        net: &str,
-        data_dir: Option<PathBuf>,
-        emit: impl Fn(String) + Send + 'static,
-    ) -> Result<Arc<Hub>, String> {
-        let s = spec(net).ok_or_else(|| format!("no network called {net}"))?;
-        let db_path = data_dir.map(|d| d.join(format!("hub-{net}-db.json")));
+impl Relay {
+    pub fn start(name: &str, data_dir: Option<PathBuf>) -> Result<Arc<Relay>, String> {
+        let spec = relay_spec(name).ok_or_else(|| format!("no relay chain called {name}"))?;
+        let db_path = data_dir.map(|d| d.join(format!("hub-{name}-db.json")));
         let db = db_path.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
 
         let mut client = Client::new(Guarded::new(
@@ -78,7 +79,7 @@ impl Hub {
         // The relay answers only our own database request, so its server is kept small.
         let relay = client
             .add_chain(smoldot_light::AddChainConfig {
-                specification: s.relay,
+                specification: spec,
                 json_rpc: smoldot_light::AddChainConfigJsonRpc::Enabled {
                     max_pending_requests: NonZero::<u32>::new(4).unwrap(),
                     max_subscriptions: 0,
@@ -89,45 +90,18 @@ impl Hub {
                 statement_protocol_config: None,
             })
             .map_err(|e| e.to_string())?;
-        let relay_id = relay.chain_id;
+        let id = relay.chain_id;
         let mut relay_responses = relay.json_rpc_responses.ok_or("no relay JSON-RPC channel")?;
-
-        let para = client
-            .add_chain(smoldot_light::AddChainConfig {
-                specification: s.para,
-                json_rpc: smoldot_light::AddChainConfigJsonRpc::Enabled {
-                    max_pending_requests: NonZero::<u32>::new(256).unwrap(),
-                    max_subscriptions: 64,
-                },
-                potential_relay_chains: [relay_id].into_iter(),
-                database_content: "",
-                user_data: (),
-                statement_protocol_config: None,
-            })
-            .map_err(|e| e.to_string())?;
-        let mut responses = para.json_rpc_responses.ok_or("no JSON-RPC channel")?;
-
-        let hub = Arc::new(Hub { client: Mutex::new(client), para: para.chain_id });
-
-        std::thread::Builder::new()
-            .name(format!("hub-{net}"))
-            .spawn(move || {
-                smol::block_on(async move {
-                    while let Some(raw) = responses.next().await {
-                        emit(raw);
-                    }
-                })
-            })
-            .map_err(|e| e.to_string())?;
+        let r = Arc::new(Relay { client: Mutex::new(client), id });
 
         // Keep the relay's database so the next start skips the warp sync.
-        let keeper = hub.clone();
+        let keeper = r.clone();
         std::thread::Builder::new()
-            .name(format!("hub-{net}-db"))
+            .name(format!("relay-{name}-db"))
             .spawn(move || loop {
                 std::thread::sleep(Duration::from_secs(300));
                 let req = json!({"id":"db","jsonrpc":"2.0","method":"chainHead_unstable_finalizedDatabase","params":[1048576]});
-                if keeper.client.lock().unwrap().json_rpc_request(req.to_string(), relay_id).is_err() {
+                if keeper.client.lock().unwrap().json_rpc_request(req.to_string(), id).is_err() {
                     continue;
                 }
                 let answer = smol::block_on(smol::future::or(
@@ -143,12 +117,66 @@ impl Hub {
                 }
             })
             .map_err(|e| e.to_string())?;
+        Ok(r)
+    }
+}
 
+pub struct Hub {
+    relay: Arc<Relay>,
+    para: ChainId,
+}
+
+impl Hub {
+    /// A parachain on its own fresh relay client (the tests and the bridge use this).
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub fn start(
+        net: &str,
+        data_dir: Option<PathBuf>,
+        emit: impl Fn(String) + Send + 'static,
+    ) -> Result<Arc<Hub>, String> {
+        let (relay, _) = para_spec(net).ok_or_else(|| format!("no network called {net}"))?;
+        Hub::start_on(Relay::start(relay, data_dir)?, net, emit)
+    }
+
+    /// Add a parachain to a running relay client. `emit` receives every message the
+    /// parachain's JSON-RPC server sends back.
+    pub fn start_on(relay: Arc<Relay>, net: &str, emit: impl Fn(String) + Send + 'static) -> Result<Arc<Hub>, String> {
+        let (_, spec) = para_spec(net).ok_or_else(|| format!("no network called {net}"))?;
+        let para = relay
+            .client
+            .lock()
+            .unwrap()
+            .add_chain(smoldot_light::AddChainConfig {
+                specification: spec,
+                json_rpc: smoldot_light::AddChainConfigJsonRpc::Enabled {
+                    max_pending_requests: NonZero::<u32>::new(256).unwrap(),
+                    max_subscriptions: 64,
+                },
+                potential_relay_chains: [relay.id].into_iter(),
+                database_content: "",
+                user_data: (),
+                statement_protocol_config: None,
+            })
+            .map_err(|e| e.to_string())?;
+        let mut responses = para.json_rpc_responses.ok_or("no JSON-RPC channel")?;
+        let hub = Arc::new(Hub { relay, para: para.chain_id });
+
+        std::thread::Builder::new()
+            .name(format!("hub-{net}"))
+            .spawn(move || {
+                smol::block_on(async move {
+                    while let Some(raw) = responses.next().await {
+                        emit(raw);
+                    }
+                })
+            })
+            .map_err(|e| e.to_string())?;
         Ok(hub)
     }
 
     pub fn send(&self, msg: &str) -> Result<(), String> {
-        self.client
+        self.relay
+            .client
             .lock()
             .unwrap()
             .json_rpc_request(msg.to_string(), self.para)
@@ -157,18 +185,32 @@ impl Hub {
 }
 
 #[derive(Default)]
-pub struct HubState(pub Mutex<HashMap<String, Arc<Hub>>>);
+pub struct HubState {
+    relays: Mutex<HashMap<String, Arc<Relay>>>,
+    hubs: Mutex<HashMap<String, Arc<Hub>>>,
+}
 
 fn hub_for(app: &tauri::AppHandle, state: &HubState, net: &str) -> Result<Arc<Hub>, String> {
     use tauri::Manager;
-    let mut hubs = state.0.lock().unwrap();
+    let mut hubs = state.hubs.lock().unwrap();
     if let Some(h) = hubs.get(net) {
         return Ok(h.clone());
     }
-    let dir = app.path().app_data_dir().ok();
+    let (relay_name, _) = para_spec(net).ok_or_else(|| format!("no network called {net}"))?;
+    let relay = {
+        let mut relays = state.relays.lock().unwrap();
+        match relays.get(relay_name) {
+            Some(r) => r.clone(),
+            None => {
+                let r = Relay::start(relay_name, app.path().app_data_dir().ok())?;
+                relays.insert(relay_name.to_string(), r.clone());
+                r
+            }
+        }
+    };
     let handle = app.clone();
     let name = net.to_string();
-    let h = Hub::start(net, dir, move |msg| {
+    let h = Hub::start_on(relay, net, move |msg| {
         let _ = handle.emit("hub", Message { net: name.clone(), msg });
     })?;
     hubs.insert(net.to_string(), h.clone());
@@ -181,7 +223,7 @@ pub fn hub_start(app: tauri::AppHandle, state: tauri::State<'_, HubState>, net: 
     hub_for(&app, &state, &net).map(|_| ())
 }
 
-/// One JSON-RPC message to the network's Asset Hub. Answers arrive as `hub` events.
+/// One JSON-RPC message to the network's parachain. Answers arrive as `hub` events.
 #[tauri::command]
 pub fn hub_send(
     app: tauri::AppHandle,
@@ -251,6 +293,35 @@ mod tests {
     #[ignore]
     fn follows_kusama_asset_hub() {
         follows("kusama");
+    }
+
+    #[test]
+    #[ignore]
+    fn follows_kreivo() {
+        follows("kreivo");
+    }
+
+    // Both Kusama parachains on one relay client, as the app runs them.
+    #[test]
+    #[ignore]
+    fn kreivo_and_asset_hub_share_a_relay() {
+        let relay = Relay::start("kusama", None).unwrap();
+        for net in ["kreivo", "kusama"] {
+            let (tx, rx) = std::sync::mpsc::channel::<String>();
+            let hub = Hub::start_on(relay.clone(), net, move |m| {
+                let _ = tx.send(m);
+            })
+            .unwrap();
+            hub.send(r#"{"id":2,"jsonrpc":"2.0","method":"chainHead_v1_follow","params":[true]}"#).unwrap();
+            loop {
+                let m = rx.recv_timeout(Duration::from_secs(180)).expect("no answer from the light client");
+                let v: Value = serde_json::from_str(&m).unwrap();
+                if v["params"]["result"]["event"] == "initialized" {
+                    println!("{net} on the shared relay: {}", v["params"]["result"]["finalizedBlockRuntime"]["spec"]["specName"]);
+                    break;
+                }
+            }
+        }
     }
 
     // The same light client on a local socket, one JSON message per line, so the
