@@ -88,6 +88,10 @@ export interface Edition {
    *  collective's documents (infra/services/room-agent/box). Absent, it is the
    *  door's `<signIn.pair>/context`. Decent's is on Decent's own box, not Zo. */
   context?: string;
+  /** where Pay's wallet calls go when that is not `origin`. Since 2026-11-11 the wallet
+   *  routes require the member's app session and act only for their own alias (VULN-019,
+   *  VULN-034 fixed), so Decent's go through `origin` (www.decent.partners) like the rest. */
+  wallet?: { base: string };
   /** where this collective's invites land: `base` serves `/join` and records the
    *  invite (infra/services/app-updates/invite.ts), `update` is its signed update
    *  channel. Always the collective's own host, never a Zo address. An edition
@@ -106,6 +110,10 @@ export interface Edition {
    *  infra/services/explorer. Always the collective's own host. The On chain
    *  plugin reads it; members see names through the door's roster. */
   explorer?: { base: string };
+  /** where this collective serves the jobs its network needs done (`/api/kabocha-tasks`):
+   *  infra/services/kabocha-tasks, board in github.com/Birdbrain-wtf/kabocha-tasks.
+   *  Always the collective's own host. The Tasks plugin reads it. */
+  tasks?: { base: string };
   /** where a member can share one note with this collective, by choice, signed
    *  with their check-in key (`/api/notes/share`): infra/services/notes-share.
    *  Notes stay on the device without it, and with it until the member shares. */
@@ -165,7 +173,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     // set and the Journal is its reading surface (rich, 2026-10-16).
     custom: ["journal"],
     plugins: [...STARTER.filter((id) => id !== "magazine"), "pay"],
-    optional: ["swap", "exchange", "shield", "watch", "onchain"],
+    optional: ["swap", "exchange", "watch", "onchain", "tasks"],
     privateChats: true,
     exchangeMarket: "dex.birdbrain.wtf:7232",
     // served by Birdbrain's own box, never Zo (ADR 0076, 0078)
@@ -173,6 +181,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     home: "agent",
     joinable: ["decent"],
     explorer: { base: "https://birdbrain.wtf" },
+    tasks: { base: "https://birdbrain.wtf" },
     signIn: {
       app: "murmur",
       pair: "https://birdbrain.wtf/api/chaos/app/pair",
@@ -185,7 +194,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     id: "decent",
     productName: "Decent",
     instance: { slug: "decent", name: "Decent" },
-    origin: "https://rw.zo.space",
+    origin: "https://www.decent.partners",
     defaultSkin: "",
     selfUpdate: true,
     // Notes stay on the member's device. One note reaches Decent's vault only
@@ -196,7 +205,7 @@ const EDITIONS: Record<EditionId, Edition> = {
     // Decent Magazine and Chaos Sessions are Decent's own rituals, so in its own
     // edition they are custom. Other editions get them as the starter set.
     custom: ["magazine", "meet"],
-    plugins: ["chat", "pay", "operations", "files", "invite"],
+    plugins: ["chat", "pay", "operations", "inbox", "files", "invite"],
     // FTTF's channel, offered to add: it plays as a guest here (plugins/watch)
     optional: ["swap", "watch", "onchain"],
     home: "agent",

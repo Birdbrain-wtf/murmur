@@ -22,7 +22,8 @@ import {
   inputClass,
 } from "../../ui";
 import { checked, hasHub, hubClient, type Net } from "../../lib/hub";
-import { keySecret } from "../../lib/secrets";
+import { accountKey, forgetAccount, revealWords, saveWords } from "../../lib/account";
+import { requestSign, type SignProgress } from "../../lib/signer";
 import { openInBrowser } from "../../identity/passkey";
 import {
   NETWORKS,
@@ -31,10 +32,9 @@ import {
   canSwap,
   formatAmount,
   history as readHistory,
-  keyFromWords,
+  dusdLocation,
   networkFee,
   newWords,
-  normaliseWords,
   other,
   parseAmount,
   quote as readQuote,
@@ -42,8 +42,9 @@ import {
   recipient,
   remember,
   sendFee,
-  submitSend,
-  submitSwap,
+  sendTx,
+  swappedOut,
+  swapTx,
   token,
   validWords,
   withAsset,
@@ -64,20 +65,18 @@ import {
  * quote says how far the trade moves that price, because the pool is small.
  *
  * The account is a key on this computer, made from twelve words the member
- * writes down. The words sit in the system's secure store and are read only at
- * the moment of signing. Real KSM is quoted but not swapped yet (REAL_MONEY).
+ * writes down, held by the app (lib/account.ts). Swap builds each call and the
+ * app's signer shows it to the member and signs it (lib/signer.ts), so the words
+ * never pass through this plugin. Real KSM is quoted but not swapped yet
+ * (REAL_MONEY).
  */
 
 const NET_KEY = "murmur.swap.net.v1";
 /** test money, from lab/swap/drip.ts behind the Birdbrain edge */
 const DRIP = "https://birdbrain.wtf/api/murmur/drip";
-const ACCOUNT_KEY = "murmur.swap.account.v1";
-const WORDS = "swap.words";
 /** past this, the member confirms they mean it */
 const BIG_MOVE = 0.1;
 
-const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
-const unhex = (s: string) => new Uint8Array(s.match(/../g)!.map((x) => parseInt(x, 16)));
 const pct = (x: number) => `${(x * 100).toFixed(x < 0.01 ? 2 : 1)}%`;
 
 function useClient(net: Net) {
@@ -103,10 +102,7 @@ function useClient(net: Net) {
 
 function Panel(_: PluginContext) {
   const [net, setNet] = useState<Net>(() => (localStorage.getItem(NET_KEY) as Net) || "paseo");
-  const [account, setAccount] = useState<Uint8Array | null>(() => {
-    const v = localStorage.getItem(ACCOUNT_KEY);
-    return v ? unhex(v) : null;
-  });
+  const [account, setAccount] = useState<Uint8Array | null>(accountKey);
   const n = NETWORKS[net];
   const { client, block } = useClient(net);
   const [bal, setBal] = useState<Balances | null>(null);
@@ -170,10 +166,7 @@ function Panel(_: PluginContext) {
         {problem && <Notice tone="danger">{problem}</Notice>}
         {!account ? (
           <MakeAccount
-            onDone={(pk) => {
-              localStorage.setItem(ACCOUNT_KEY, hex(pk));
-              setAccount(pk);
-            }}
+            onDone={(pk) => setAccount(pk)}
           />
         ) : (
           <>
@@ -189,7 +182,6 @@ function Panel(_: PluginContext) {
               bal={bal}
               onRefresh={refresh}
               onForget={() => {
-                localStorage.removeItem(ACCOUNT_KEY);
                 setBal(null);
                 setAccount(null);
               }}
@@ -234,10 +226,7 @@ function MakeAccount({ onDone }: { onDone: (publicKey: Uint8Array) => void }) {
     setBusy(true);
     setProblem(null);
     try {
-      const clean = normaliseWords(w);
-      const key = keyFromWords(clean);
-      await keySecret.set(WORDS, clean);
-      onDone(key.publicKey);
+      onDone(await saveWords(w));
     } catch (e) {
       setProblem(String((e as Error)?.message ?? e));
     } finally {
@@ -346,19 +335,18 @@ function MakeAccount({ onDone }: { onDone: (publicKey: Uint8Array) => void }) {
 
 // ── the swap ────────────────────────────────────────────────────────────────
 
-/** The account's key, read from the secure store at the moment of signing. */
-async function signingKey(n: Network, address: string, onProgress: (p: Progress) => void) {
-  const words = await keySecret.get(WORDS);
-  if (!words) {
-    onProgress({ stage: "failed", reason: "This computer no longer holds the account's key. Restore it from your words." });
-    return null;
-  }
-  const key = keyFromWords(words);
-  if (key.address(n) !== address) {
-    onProgress({ stage: "failed", reason: "The key on this computer is not this account's. Restore it from your words." });
-    return null;
-  }
-  return key;
+/**
+ * Swap never holds the key: it asks the app's signer (lib/signer.ts), which
+ * shows the member the call and signs it once they say yes. This turns the
+ * signer's steps into the ones Swap draws.
+ */
+function relay(set: (p: Progress | null) => void, out: (events: any[]) => bigint | null) {
+  return (p: SignProgress) => {
+    if (p.stage === "waiting") set({ stage: "signing" });
+    else if (p.stage === "declined") set(null);
+    else if (p.stage === "final") set({ stage: "final", block: p.block, number: p.number, index: p.index, amountOut: out(p.events) });
+    else set(p);
+  };
 }
 
 function SwapCard({
@@ -445,9 +433,10 @@ function SwapCard({
 
   const swap = async () => {
     if (!q) return;
-    const key = await signingKey(n, address, setProgress);
-    if (!key) return;
-    const r = await submitSwap(client, n, q, key, { feeInDusd }, setProgress);
+    const r = await requestSign(
+      { plugin: "swap", chain: n.id, tx: swapTx(client, n, q, address), feeAsset: feeInDusd ? dusdLocation(n) : undefined },
+      relay(setProgress, swappedOut),
+    );
     if (r.stage === "final") {
       remember({
         kind: "swap",
@@ -455,7 +444,7 @@ function SwapCard({
         at: new Date().toISOString(),
         from,
         amountIn: formatAmount(q.amountIn, tIn.decimals),
-        amountOut: formatAmount(r.amountOut ?? q.amountOut, tOut.decimals),
+        amountOut: formatAmount(swappedOut(r.events) ?? q.amountOut, tOut.decimals),
         block: r.block,
         index: r.index,
         ...(n !== base ? { asset: n.dusd.assetId } : {}),
@@ -802,9 +791,10 @@ function SendSection({
 
   const send = async () => {
     if (!to || !amount) return;
-    const key = await signingKey(n, address, setProgress);
-    if (!key) return;
-    const r = await submitSend(client, n, side, to, amount, key, { feeInDusd }, setProgress);
+    const r = await requestSign(
+      { plugin: "swap", chain: n.id, tx: sendTx(client, n, side, to, amount), feeAsset: feeInDusd ? dusdLocation(n) : undefined },
+      relay(setProgress, () => amount),
+    );
     if (r.stage === "final") {
       remember({
         kind: "send",
@@ -978,7 +968,7 @@ function AccountSection({
 
   const show = async () => {
     setProblem(null);
-    const w = await keySecret.get(WORDS);
+    const w = await revealWords();
     if (!w) {
       setProblem("This computer no longer holds the account's key. Restore it from your words.");
       return;
@@ -990,7 +980,7 @@ function AccountSection({
   const forget = async () => {
     setProblem(null);
     try {
-      await keySecret.delete(WORDS);
+      await forgetAccount();
       onForget();
     } catch (e) {
       setProblem(String((e as Error)?.message ?? e));
@@ -1142,6 +1132,7 @@ export const swapPlugin: MurmurModule = {
   order: 26,
   kind: "plugin",
   lab: true,
+  signs: ["paseo", "kusama"],
   support: issues("swap"),
   backend: "Asset Hub, read on this computer",
   Panel,

@@ -8,6 +8,8 @@
  *                                    virtual pocket + card if none exist yet)
  *   POST /api/wallet/transactions  { accountUrn }  -> { transactions }
  *
+ * Every call carries the member's app session; the routes refuse anyone else's alias.
+ *
  * `base` is the Decent space origin — "" in dev (Vite proxies /api/wallet), the
  * zo.space origin in a Tauri build (same origin birdbrain uses).
  */
@@ -76,10 +78,29 @@ export class WalletVerificationError extends Error {
   }
 }
 
+/**
+ * The app's own sign-in, which the wallet routes require (VULN-019): they act only for
+ * the signed-in member's own alias, and the card face needs a sign-in from the last
+ * 15 minutes. Sent as x-decent-session because Zo's gateway drops Authorization.
+ */
+function appSession(): string | null {
+  try {
+    const id = JSON.parse(localStorage.getItem("murmur.identity.v1") || "null");
+    return id?.session && (!id.sessionExp || id.sessionExp > Date.now() / 1000) ? String(id.session) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function post<T>(base: string, path: string, body: unknown): Promise<T> {
+  const session = appSession();
   const res = await fetch(`${base}${path}`, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...(session ? { "x-decent-session": session } : {}),
+    },
     body: JSON.stringify(body),
   });
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Compass, Mail, Sparkles, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Compass, Mail, Moon, Sparkles, Sun, X } from "lucide-react";
+import { useTheme } from "../host/theme";
 import { edition, groupWord, packed, shaped, showcaseName } from "../edition";
 import { GROUPS, hereGroup } from "./groups";
 import { getModule, rank } from "../host/registry";
@@ -7,6 +8,7 @@ import { Button, Status } from "../ui";
 import { askForLogins, askLabel, useDemoNote } from "./note";
 import { samplePublication } from "./sample";
 import { TailorForm } from "./tailor";
+import { hasSeats, seat, seatRole, seatSees, sitAs } from "./seeas";
 import type { CatalogTab } from "../host/App";
 
 export { askForLogins, askLabel };
@@ -41,11 +43,13 @@ export function DemoBar({
 }) {
   const note = useDemoNote();
   return (
-    <div className="flex shrink-0 items-center gap-3 border-b border-[var(--line)] px-4 py-1.5 text-[12px]">
+    <div className="flex shrink-0 flex-wrap items-center gap-1 sm:gap-3 border-b border-[var(--line)] px-4 py-1.5 text-[12px]">
       <Status tone="live">demo</Status>
       <span className="min-w-0 flex-1 truncate text-[var(--muted)]" role="status">
         {note
           ? note.text
+          : seat > 0 && seatRole
+            ? `Seen as ${seatRole.name.toLowerCase()}, who ${seatRole.line.charAt(0).toLowerCase()}${seatRole.line.slice(1)}. Sample data.`
           : hereGroup && shaped?.alice
             ? `${name}, another of Alice's groups. She's ${hereGroup.role} here, with the same identity and notes.`
             : packed && shaped?.source === "pack"
@@ -56,18 +60,54 @@ export function DemoBar({
               ? `${name} is an invented collective. All sample data, and nothing leaves this computer.`
               : `A preview of ${name}'s own app, with sample data. Nothing here leaves this computer.`}
       </span>
-      <Button variant="quiet" icon={Compass} onClick={onTour}>
+      {hasSeats && shaped && (
+        <label className="flex shrink-0 items-center gap-1.5 text-[var(--muted)]" data-tour="seeas">
+          <span className="hidden sm:inline">See it as</span>
+          <select
+            aria-label="See the app as"
+            value={seat}
+            onChange={(e) => sitAs(Number(e.target.value))}
+            className="max-w-[9.5rem] rounded-full border border-[var(--line-strong)] bg-[var(--card)] px-2 py-1 text-[12px] font-medium text-[var(--fg)]"
+          >
+            {shaped.roles.map((r, i) => (
+              <option key={r.name} value={i}>
+                {r.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      <ThemeSwitch />
+      <Button variant="quiet" icon={Compass} aria-label="Walk through" onClick={onTour}>
         <span className="hidden sm:inline">Walk through</span>
       </Button>
       {edition.showcase && (
-        <Button variant="quiet" icon={Sparkles} onClick={onTailor}>
+        <Button variant="quiet" icon={Sparkles} aria-label="Change this sketch" onClick={onTailor}>
           <span className="hidden sm:inline">{packed || (shaped && !hereGroup) ? "Change it" : "Make it yours"}</span>
         </Button>
       )}
-      <Button variant="quiet" icon={Mail} onClick={askForLogins}>
+      <Button variant="quiet" icon={Mail} aria-label={askLabel} onClick={askForLogins}>
         <span className="hidden md:inline">{askLabel}</span>
       </Button>
     </div>
+  );
+}
+
+/** Light or dark, one tap, in the bar. Settings keeps the third choice, "follow this computer". */
+function ThemeSwitch() {
+  const { dark, setMode } = useTheme();
+  const Icon = dark ? Sun : Moon;
+  const label = dark ? "Switch to light" : "Switch to dark";
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={() => setMode(dark ? "light" : "dark")}
+      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[var(--muted)] transition hover:bg-[var(--raise)] hover:text-[var(--fg)]"
+    >
+      <Icon className="h-4 w-4" />
+    </button>
   );
 }
 
@@ -89,7 +129,8 @@ interface Step {
 }
 
 function steps(installed: string[]): Step[] {
-  const has = (id: string) => installed.includes(id) && !!getModule(id);
+  // Only what the seat we are in can see (./seeas.ts), so a parent's walk is a parent's app.
+  const has = (id: string) => installed.includes(id) && !!getModule(id) && seatSees(id);
   const title = (id: string) => getModule(id)?.title ?? id;
   const pub = samplePublication;
   // Huxley's own story (not a visitor's sketch): gifts, then a company, then investment.
@@ -101,7 +142,7 @@ function steps(installed: string[]): Step[] {
       target: "agent",
       opens: "agent",
       title: `Talk to ${name}`,
-      body: `Start with How you'll use ${name}: today a screen for each thing, next one page that shows what needs you, later mostly a conversation. Tap each stage. Below, ask it anything. Here it follows a script.`,
+      body: `Start with How you'll use ${name}. Tap the three stages, then ask it anything. Here it follows a script.`,
     });
   if (has("magazine"))
     out.push({
@@ -111,7 +152,7 @@ function steps(installed: string[]): Step[] {
       body: pub
         ? story
           ? `When an idea needs more than a chat, someone writes it up in ${pub.name}, signed. Everyone reads the case before anything is decided. The roof, the bursaries and the kit all started here.`
-          : `${name}'s own publication. Ideas are written up and signed here before anything is decided.${has("fundraise") ? " Open a piece to see the initiative it argues for." : ""}`
+          : `${name}'s own publication. Ideas are written up and signed here before anything is decided.${has("fundraise") ? " Open a piece to see what it led to." : ""}`
         : `Long reads for the whole ${groupWord}. This is Decent Magazine, live. Later, ${name} publishes its own here.`,
     });
   if (has("fundraise"))
@@ -122,7 +163,7 @@ function steps(installed: string[]): Step[] {
       body: pub
         ? story
           ? `Once members agree, they raise the money. With no legal form, ${name} raised gifts for its roof, bursaries and a travelling recording kit. Then the kit started earning, and growing it needed investment.`
-          : `Money comes after the argument. Each initiative was made in ${pub.name}, agreed by members, then raised for, and links back to its case.`
+          : `Money comes after the argument. Each initiative links back to the piece in ${pub.name} that made its case.`
         : `${getModule("fundraise")!.tagline}. Set up the way ${name} works.`,
     });
   if (has("spend"))
@@ -130,7 +171,9 @@ function steps(installed: string[]): Step[] {
       target: "spend",
       opens: "spend",
       title: "Spending",
-      body: `Then it's spent, in the open. ${name} has its own debit card, and a member can get one for a single job. Bob's only pays for bursaries. Every payment shows who, what for and the receipt.`,
+      body: story
+        ? `Then it's spent, in the open. ${name} has its own debit card, and a member can get one for a single job. Bob's only pays for bursaries. Every payment shows who, what for and the receipt.`
+        : `Spent in the open. ${name} has its own card, and every payment shows who, what for and the receipt.`,
     });
   // The edition's hero, if it has one (Brainrot's game), gets its own card first after the agent.
   if (edition.lead && has(edition.lead))
@@ -154,7 +197,7 @@ function steps(installed: string[]): Step[] {
       title: "Chat",
       body: story
         ? `Once you've joined, you can talk. Rooms for everyone and for each project, messages between two people, and calls that open right here. Send a message or ring Bob.`
-        : `Rooms for the whole ${groupWord}, messages between two people, and calls. These are samples, so send a message.`,
+        : `Rooms for the whole ${groupWord}, messages between two people, and calls. Send a message.`,
     });
   if (has("meet"))
     out.push({
@@ -174,7 +217,7 @@ function steps(installed: string[]): Step[] {
       title: "Operations",
       body: story
         ? `Now the company raises money. Huxley Sessions Ltd sells shares to grow the kit, with tax relief (SEIS) for investors. Members invest on the same terms as anyone. The collective holds a tenth. Sample figures.`
-        : `The books in one place: money in and out, the share register and a round. Changes need a passkey. Sample figures.`,
+        : `The books in one place: money in and out, the share register and a round. Sample figures.`,
     });
   if (has("structure"))
     out.push({
@@ -184,8 +227,8 @@ function steps(installed: string[]): Step[] {
       body: story
         ? `To take investment, the kit became a company, Huxley Sessions Ltd. The agent drafted the papers, Decent checked them, members voted. The collective stays a collective.`
         : shaped?.stage.now === 3
-          ? `${shaped.stage.why} New groups start with nothing and take a form when they need one. The agent drafts, Decent checks, members approve.`
-          : `Start with nothing. When ${name} needs a bank account, a grant or investment, it takes the form that fits: a charity, a co-op, a company. The agent drafts, Decent checks, members approve.`,
+          ? shaped.stage.why
+          : `Start with nothing. When ${name} needs a bank account, a grant or investment, it takes the form that fits. The agent drafts, Decent checks, members approve.`,
     });
   // The agent first, then the rest top to bottom, as they sit in the rail.
   // Huxley's own story runs from the simplest thing to the most involved:
@@ -210,13 +253,22 @@ function steps(installed: string[]): Step[] {
     body: hereGroup && shaped?.alice
       ? `${name}, another of Alice's groups. She's ${hereGroup.role} here. All sample data, so try anything.`
       : packed && shaped?.source === "pack"
-      ? `A first sketch of ${name}'s own app, drawn from what we know of you so far. The people are made up and so are the figures, so try anything. About five minutes.`
+      ? `A first sketch of ${name}'s own app. The people and the figures are made up, so try anything. About five minutes.`
       : shaped
       ? `${name}, sketched from “${shaped.asked}”. Everything here is drawn from that. All sample data, so try anything.`
       : edition.showcase
         ? `A tool to help any group understand itself and each other better, get more done together and share in the value it creates. A community, a company, a charity or a co-op.`
         : `A demo of ${name}'s own app. All sample data, so try anything. Two minutes.`,
   });
+  // A sketch with more than one kind of member: say whose seat this is and how to change it.
+  if (hasSeats && shaped && seatRole && !shaped.alice) {
+    const others = shaped.roles.filter((r) => r !== seatRole).map((r) => r.name.toLowerCase());
+    out.splice(1, 0, {
+      target: "seeas",
+      title: "See it as",
+      body: `Everyone gets a different app. This one is for ${seatRole.name.toLowerCase()}, who ${seatRole.line.charAt(0).toLowerCase()}${seatRole.line.slice(1)}. Choose another seat at the top to see theirs: ${others.slice(0, -1).join(", ")} or ${others[others.length - 1]}.`,
+    });
+  }
   if (edition.showcase && !shaped)
     out.splice(1, 0, {
       title: `Meet ${name}`,
@@ -228,21 +280,21 @@ function steps(installed: string[]): Step[] {
       target: "catalog",
       tab: "plugins",
       title: "Plugins",
-      body: `Add or remove what's in the rail, including plugins made for ${name} and ones other groups share.`,
+      body: `Add or remove what's in the rail, including plugins made for ${name}.`,
     },
     {
       target: "catalog",
       tab: "access",
       title: "Who can use what",
       body: roles
-        ? `Each plugin has its own levels. ${roles[0].name} run everything, ${roles[roles.length - 1].name.toLowerCase()} see only what they're given. Changes are approved and recorded.`
-        : `Each plugin has its own levels. An investor sees the company's books but not members' chat. A guest sees only what they're invited to. Changes are approved and recorded.`,
+        ? `Each plugin has its own levels. ${roles[0].name} run everything, ${roles[roles.length - 1].name.toLowerCase()} see only what they're given. Choose "See it as" in the bar at the top to open the app from each seat.`
+        : `Each plugin has its own levels. An investor sees the company's books but not members' chat. A guest sees only what they're invited to.`,
     },
     {
       target: "settings",
       opens: "settings",
       title: "Settings",
-      body: "How the app looks, and the ledger: the shared record of who made what. Many computers keep copies, so nobody can quietly change it.",
+      body: "How the app looks, and the ledger: the shared record of who made what, which nobody can quietly change.",
     },
     {
       target: "settings",
@@ -256,7 +308,7 @@ function steps(installed: string[]): Step[] {
       opens: "notes",
       title: edition.showcase ? "Your own space to think" : "Notes",
       body: edition.showcase
-        ? `Now the person, not the group. Notes is yours alone, kept on your computer. No group sees it. When something's ready, you choose where it goes.`
+        ? `Now the person, not the group. Notes is yours alone, kept on your computer. No group sees it.`
         : "Your own space to think, kept on this computer. No group can see it.",
     },
     ...(story ? [] : [{
@@ -264,7 +316,7 @@ function steps(installed: string[]): Step[] {
       opens: "identity",
       section: "yours",
       title: "Your own identity",
-      body: `Profile is yours, not ours. Your key stays on your phone, so nobody can sign in as you or take your membership away. This is a sample member, Alice.`,
+      body: `Profile is yours, not ours. Your key stays on your phone, so nobody can sign in as you. This is a sample member, Alice.`,
     }]),
     ...(GROUPS.length
       ? [
@@ -273,7 +325,7 @@ function steps(installed: string[]): Step[] {
             opens: "identity",
             section: "groups",
             title: "Many groups, one you",
-            body: `Alice is in four groups: ${showcaseName}, a production company, her street's hall and a food co-op. One tap moves between them. Her identity and record go with her.`,
+            body: `Alice is in four groups. One tap moves between them, and her identity and record go with her.`,
           },
         ]
       : []),
@@ -282,14 +334,14 @@ function steps(installed: string[]): Step[] {
       opens: "identity",
       section: "record",
       title: "Your record",
-      body: `Everything you contribute is recorded: that it was yours, when, and who may use it. Tap the icons to change that. Nothing is used without your say.`,
+      body: `Everything you contribute is recorded as yours. Tap the icons to say who may use it. Nothing is used without your say.`,
     },
     {
       target: "settings",
       opens: "settings",
       section: "lens",
       title: "Your own way of seeing",
-      body: `Say how you like to see things, “more visual” or “raw numbers”, and the record redraws to match. Everyone gets their own version of the app.`,
+      body: `Say how you like to see things, “more visual” or “raw numbers”, and the record redraws to match.`,
     },
     ...(GROUPS.length
       ? [
@@ -298,21 +350,21 @@ function steps(installed: string[]): Step[] {
             opens: "identity",
             section: "expertise",
             title: "What you know",
-            body: "The record shows what Alice is good at, built from signed work rather than a CV. Each group that saw the work vouches for it. Private until she shows it.",
+            body: "What Alice is good at, built from signed work rather than a CV. Private until she shows it.",
           },
           {
             target: "identity",
             opens: "identity",
             section: "asked",
             title: "Asked of you",
-            body: `A group posts a challenge. It goes privately to people who've done it before. Alice sees the question, not who asked. The group sees the answer, not her name.`,
+            body: `A group posts a challenge, and it goes privately to people who've done it before. Neither side sees the other's name.`,
           },
           {
             target: "identity",
             opens: "identity",
             section: "income",
             title: "What comes back",
-            body: `What it could add up to. Each payment traces to something she did, and arrives without an invoice. Sample figures. Nobody is paid through the network today.`,
+            body: `What it could add up to. Each payment traces to something she did. Sample figures. Nobody is paid through the network today.`,
           },
           {
             target: "identity",
@@ -328,7 +380,7 @@ function steps(installed: string[]): Step[] {
       opens: "identity",
       section: "together",
       title: "Stronger together",
-      body: `Together, ${name}'s record proves original, consented judgement, which AI is short of. So the group can set terms as one. The start of an intelligence that is public, answers to the people who made it, and could pay them.`,
+      body: `Together, ${name}'s record proves original, consented judgement, which AI is short of. So the group can set its terms as one.`,
     },
     ...(edition.showcase && getModule("how")
       ? [
@@ -336,7 +388,7 @@ function steps(installed: string[]): Step[] {
             target: "how",
             opens: "how",
             title: "How it all works",
-            body: "Underneath: a ledger nobody can quietly change, money that moves in seconds, your group's own chat, and intelligence groups run together. No mining, no coin to buy. Tap a layer to follow Alice's answer down.",
+            body: "Underneath: a ledger nobody can quietly change, money that moves in seconds and intelligence groups run together. No coin to buy. Tap a layer.",
           },
           ...(story && has("agent")
             ? [
@@ -412,7 +464,7 @@ export function Tour({
       const el = step.target ? document.querySelector(`[data-tour="${step.target}"]`) : null;
       // On a phone the rail scrolls sideways: bring the button into view
       // without moving anything else on the page.
-      const bar = el?.closest<HTMLElement>(".overflow-x-auto");
+      const bar = el?.closest<HTMLElement>(".app-nav");
       if (el && bar) {
         const r = el.getBoundingClientRect(), b = bar.getBoundingClientRect();
         if (r.left < b.left || r.right > b.right) bar.scrollLeft += r.left - b.left - b.width / 2 + r.width / 2;
@@ -484,7 +536,7 @@ export function Tour({
           <span className="flex-1" />
           {last ? (
             <>
-              <Button icon={Mail} onClick={askForLogins}>
+              <Button icon={Mail} aria-label={askLabel} onClick={askForLogins}>
                 {askLabel}
               </Button>
               <Button variant={step.tailor ? "quiet" : "primary"} onClick={finish}>

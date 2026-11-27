@@ -11,6 +11,7 @@ import {
 import type { MurmurPlugin, PluginContext } from "../../host/types";
 import { issues } from "../../host/support";
 import { openInBrowser } from "../../identity/passkey";
+import { edition } from "../../edition";
 import {
   walletBalance,
   walletInit,
@@ -46,10 +47,13 @@ import {
 } from "../../ui";
 
 function Panel({ instance, identity }: PluginContext) {
-  // Wallet calls share the instance's Decent space origin (same as birdbrain).
-  const base = instance.birdbrainBase;
+  // Wallet calls go to the edition's wallet address when it names one, else the
+  // instance's own origin. Every call carries the member's session (lib/wallet.ts).
+  const base = edition.wallet?.base ?? instance.birdbrainBase;
 
-  const [alias, setAlias] = useState((identity.handle ?? "").replace(/^@/, ""));
+  // The wallet routes only open the signed-in member's own alias (@<userId>) or one listed
+  // for them in infra/state/bloque/wallet-holders.json, so start from the userId.
+  const [alias, setAlias] = useState((identity.userId ?? identity.handle ?? "").replace(/^@/, ""));
   const [phase, setPhase] = useState<"idle" | "loading" | "ready">("idle");
   const [error, setError] = useState<string | null>(null);
   const [accounts, setAccounts] = useState<WalletAccount[] | null>(null);
@@ -132,8 +136,10 @@ function Panel({ instance, identity }: PluginContext) {
     try {
       const face = await walletCard(base, a2, urn);
       setRevealUrl(face.cardUrl ?? null);
-    } catch {
+    } catch (err) {
+      // Usually "sign in again": the card face needs a sign-in from the last 15 minutes.
       setRevealUrl(null);
+      setError(err instanceof Error ? err.message : String(err));
     } finally {
       setRevealLoading(false);
     }

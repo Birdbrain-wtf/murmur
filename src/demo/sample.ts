@@ -1,5 +1,6 @@
 import { edition, shaped } from "../edition";
 import type { OpsMe } from "../lib/ops";
+import { seatRole, seatSees } from "./seeas";
 
 /**
  * Sample data for a demo edition (`edition.demo`), so a collective can see how
@@ -457,7 +458,8 @@ const HUXLEY_ANSWERS: SampleAnswer[] = [
 ];
 
 export const sampleAnswers: SampleAnswer[] = [
-  ...(shaped?.answers ?? []).map((x) => ({ match: like(x.q), a: x.a, places: placesIn(x.a), ask: x.q })),
+  // The questions the seat we are in would ask come first (demo/seeas.ts), then the group's.
+  ...[...(seatRole?.asks ?? []), ...(shaped?.answers ?? [])].map((x) => ({ match: like(x.q), a: x.a, places: placesIn(x.a).filter(seatSees), ask: x.q })),
   ...(HUXLEY ? HUXLEY_ANSWERS : []),
   {
     match: rx(/new|start/i),

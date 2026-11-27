@@ -21,6 +21,7 @@ import {
   validateMnemonic,
 } from "@polkadot-labs/hdkd-helpers";
 import type { Net } from "./hub";
+import { explainRefusal } from "./refusals";
 
 export type { Net };
 export type Side = "native" | "dusd";
@@ -110,6 +111,13 @@ const location = (n: Network, side: Side) =>
           ],
         },
       };
+
+/** Where dUSD (or the asset standing in for it) sits, as the fee-payment option takes it. */
+export const dusdLocation = (n: Network) => location(n, "dusd");
+
+/** What a finished swap paid out, from its events. */
+export const swappedOut = (events: any[]): bigint | null =>
+  events.find((x) => x.type === "AssetConversion" && x.value.type === "SwapExecuted")?.value.value.amount_out ?? null;
 
 export const token = (n: Network, side: Side) => (side === "native" ? n.native : n.dusd);
 export const other = (side: Side): Side => (side === "native" ? "dusd" : "native");
@@ -378,19 +386,7 @@ export function submitSend(
 }
 
 function describe(err: any): string {
-  const inner = err?.value?.value?.type ?? err?.value?.type ?? err?.type;
-  const known: Record<string, string> = {
-    ProvidedMinimumNotSufficientForSwap: "The price moved more than 1% before the block. Nothing was swapped. Ask for a new quote.",
-    InsufficientLiquidity: "The pool does not hold enough for this swap.",
-    AmountOutTooHigh: "The pool does not hold enough for this swap.",
-    BalanceLow: "This account does not hold enough for the swap and its fee.",
-    FundsUnavailable: "This account does not hold enough for the swap and its fee.",
-    NotExpendable: "That would spend the minimum this account must keep open. Try a little less.",
-    ExistentialDeposit: "That is less than the smallest amount an empty account can receive here. Send a little more.",
-    BelowMinimum: "That is less than the smallest amount an empty account can receive here. Send a little more.",
-    CannotCreate: `That account holds none of the network's own token, so it can't receive dUSD yet. Send it a little of that first.`,
-  };
-  return known[inner] ?? `The chain refused it (${inner ?? JSON.stringify(err)}).`;
+  return explainRefusal(err);
 }
 
 // ── history, kept on this computer ──────────────────────────────────────────

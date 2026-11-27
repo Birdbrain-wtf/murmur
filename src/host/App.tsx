@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Plus, X, Fingerprint, ArrowUpRight, ArrowUp, ArrowDown, RotateCcw } from "lucide-react";
+import { Plus, X, Fingerprint, ArrowUpRight, ArrowUp, ArrowDown, RotateCcw, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import type { MurmurModule } from "./types";
 import {
   coreModules,
@@ -14,12 +14,14 @@ import { useIdentity } from "../identity/useIdentity";
 import { logoUrl, useSkin } from "./useSkin";
 import { useUpdater } from "./useUpdater";
 import { UpdateBanner } from "./UpdateBanner";
+import { SignSheet } from "./SignSheet";
 import { PluginFeedback } from "./PluginFeedback";
 import { CollectiveSwitcher } from "./Collectives";
 import { edition, shaped, TIERS, tierOf } from "../edition";
 import { Button, Status } from "../ui";
 import { DemoBar, isDemo, Tour, tourSeen } from "../demo";
 import { AccessTable } from "../demo/access";
+import { seatSees } from "../demo/seeas";
 import { LiveAccess } from "./Access";
 import { accessSupported } from "../lib/access";
 import { useReach } from "../lib/reach";
@@ -27,6 +29,8 @@ import { TailorDialog } from "../demo/tailor";
 import { colourful, inkVars } from "../demo/ink";
 import { AskForm, AsksSection, SearchBox, SearchResults, useRegistry } from "./Asks";
 import type { Identity } from "./types";
+
+const RAIL_KEY = "murmur.rail.collapsed.v1";
 
 const UPGRADE_DOT = "#af52de";
 
@@ -65,7 +69,8 @@ export default function App() {
   // The rail shows only what this sign-in can use (lib/reach.ts); the Plugins sheet still lists everything installed.
   const { visible } = useReach(installed, identity.session);
   const installedPlugins = useMemo(
-    () => arrange(pluginCatalog.filter((p) => visible.includes(p.id)), rail.order),
+    // A sketch seen from one kind of member's seat shows only that member's sections (demo/seeas.ts).
+    () => arrange(pluginCatalog.filter((p) => visible.includes(p.id) && (!isDemo || seatSees(p.id))), rail.order),
     [visible, rail.order],
   );
   const shownIds = installedPlugins.map((p) => p.id);
@@ -84,13 +89,37 @@ export default function App() {
     return notes; // active plugin was uninstalled — fall back
   }, [activeId, installed, notes]);
 
+  // The rail folds to its icons; the choice is this computer's (GLOBAL in scope.ts).
+  const [collapsed, setCollapsed] = useState(() => localStorage.getItem(RAIL_KEY) === "1");
+  useEffect(() => {
+    localStorage.setItem(RAIL_KEY, collapsed ? "1" : "0");
+  }, [collapsed]);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === "\\") {
+        e.preventDefault();
+        setCollapsed((c) => !c);
+      }
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, []);
+
+  // On a phone the bar scrolls sideways: keep the open section in view.
+  useEffect(() => {
+    const el = document.querySelector('.app-nav [aria-current="page"]');
+    // Profile is pinned, so it is always in view.
+    if (el && getComputedStyle(el).position !== "sticky")
+      el.scrollIntoView({ inline: "center", block: "nearest", behavior: "smooth" });
+  }, [activeId]);
+
   const open = useCallback((id: string) => {
     setActiveId(id);
     setCatalogOpen(false);
   }, []);
 
   return (
-    <div className="flex h-full flex-col bg-[var(--bg)]">
+    <div className={`flex h-full flex-col bg-[var(--bg)] ${edition.showcase ? "sketch-surface" : ""}`}>
       <div className="spectrum-bar shrink-0" />
       {isDemo && (
         <DemoBar
@@ -101,9 +130,9 @@ export default function App() {
       )}
       {/* On phones the rail folds down into a bottom tab bar (flex-col-reverse
           puts it under the panel); md+ restores the vertical left rail. */}
-      <div className="flex min-h-0 flex-1 flex-col-reverse md:flex-row">
+      <div className="app-shell flex min-h-0 flex-1 flex-col-reverse md:flex-row">
         {/* ── rail / bottom tab bar ── */}
-        <nav aria-label="App navigation" className="app-nav">
+        <nav aria-label="App navigation" className="app-nav" data-collapsed={collapsed}>
           <CollectiveSwitcher name={skinnedInstance.name} logo={skinnedInstance.logo} />
 
           {/* body: core (notes) + installed plugins + add */}
@@ -157,6 +186,16 @@ export default function App() {
 
           {/* foot: settings + identity */}
           <div className="nav-personal">
+            <button
+              onClick={() => setCollapsed((c) => !c)}
+              title={collapsed ? "Show names (⌘\\)" : "Icons only (⌘\\)"}
+              aria-label={collapsed ? "Show names in the sidebar" : "Show icons only in the sidebar"}
+              aria-pressed={collapsed}
+              className="rail-button rail-fold prism-hover text-[var(--faint)] hover:text-[var(--fg)]"
+            >
+              {collapsed ? <PanelLeftOpen className="h-5 w-5" /> : <PanelLeftClose className="h-5 w-5" />}
+              <span className="rail-label">Collapse</span>
+            </button>
             {howMod && <RailButton mod={howMod} active={active.id === howMod.id} onClick={open} />}
             <RailButton
               mod={settingsMod}
@@ -195,7 +234,7 @@ export default function App() {
         </nav>
 
         {/* ── panel ── */}
-        <main className={`relative min-h-0 min-w-0 flex-1 ${colourful ? "inked" : ""} ${!edition.showcase ? "live-surface" : ""}`} style={inkVars(active.id)}>
+        <main className={`app-sheet relative min-h-0 min-w-0 flex-1 ${colourful ? "inked" : ""} ${!edition.showcase ? "live-surface" : ""}`} style={inkVars(active.id)}>
           <active.Panel identity={identity} instance={skinnedInstance} open={open} installed={installed} />
           <PluginFeedback
             pluginId={active.id}
@@ -230,6 +269,8 @@ export default function App() {
       {touring && (
         <Tour installed={installed} open={open} setCatalog={setCatalogOpen} onClose={() => setTouring(false)} />
       )}
+
+      <SignSheet />
 
       <UpdateBanner
         state={updater.state}

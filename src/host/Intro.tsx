@@ -62,6 +62,8 @@ interface Bird {
   y: number;
   vx: number;
   vy: number;
+  phase: number;
+  arrival: number;
   tx: number;
   ty: number;
 }
@@ -86,6 +88,8 @@ function murmuration(el: HTMLCanvasElement, logo: string | undefined, onEnd: () 
       y: cy + Math.sin(a) * r * 0.5,
       vx: 2 + Math.random(),
       vy: (Math.random() - 0.5) * 2,
+      phase: Math.random() * Math.PI * 2,
+      arrival: Math.random() * 450 - 250,
       tx: cx,
       ty: cy,
     };
@@ -119,19 +123,16 @@ function murmuration(el: HTMLCanvasElement, logo: string | undefined, onEnd: () 
   const start = performance.now();
   let raf = 0;
   let ended = false;
+  let previous = start;
 
   const frame = (now: number) => {
     const t = now - start;
+    const dt = Math.min(2, (now - previous) / (1000 / 60));
+    previous = now;
     const settle = clamp((t - FLOCK_MS) / SETTLE_MS);
     const pull = ease(settle);
 
-    if (settle < 1) flock(birds, w, h, t);
-    for (const b of birds) {
-      if (pull > 0) {
-        b.x += (b.tx - b.x) * pull * 0.18;
-        b.y += (b.ty - b.y) * pull * 0.18;
-      }
-    }
+    if (settle < 1) flock(birds, w, h, t, dt);
 
     const reveal = clamp((t - FLOCK_MS - SETTLE_MS * 0.7) / (SETTLE_MS * 0.3 + HOLD_MS));
 
@@ -148,9 +149,9 @@ function murmuration(el: HTMLCanvasElement, logo: string | undefined, onEnd: () 
     // Colour is the consequence: the mark arrives once the flock has landed.
     if (mark && reveal > 0) {
       ctx.globalAlpha = ease(reveal);
-      ctx.globalCompositeOperation = "multiply";
+      ctx.filter = "contrast(1.12)";
       ctx.drawImage(mark, cx - size / 2, cy - size / 2, size, size);
-      ctx.globalCompositeOperation = "source-over";
+      ctx.filter = "none";
       ctx.globalAlpha = 1;
     }
 
@@ -166,7 +167,7 @@ function murmuration(el: HTMLCanvasElement, logo: string | undefined, onEnd: () 
 
 /** Boids on a coarse grid: cohesion, alignment, separation, and a wandering
  *  centre the flock is drawn round, which gives the folding, pulsing shape. */
-function flock(birds: Bird[], w: number, h: number, t: number) {
+function flock(birds: Bird[], w: number, h: number, t: number, dt: number) {
   const cell = 40;
   const grid = new Map<number, Bird[]>();
   const key = (x: number, y: number) => Math.floor(x / cell) * 10007 + Math.floor(y / cell);
@@ -179,7 +180,10 @@ function flock(birds: Bird[], w: number, h: number, t: number) {
   const ax = w / 2 + Math.cos(t / 520) * w * 0.22;
   const ay = h / 2 + Math.sin(t / 380) * h * 0.16;
 
+  const velocities = new Map(birds.map(b => [b, [b.vx, b.vy]]));
   for (const b of birds) {
+    const gather = ease(clamp((t - FLOCK_MS - b.arrival) / (SETTLE_MS - b.arrival)));
+    const oldVx = b.vx, oldVy = b.vy;
     let cxs = 0, cys = 0, vxs = 0, vys = 0, sx = 0, sy = 0, c = 0;
     const gx = Math.floor(b.x / cell);
     const gy = Math.floor(b.y / cell);
@@ -193,7 +197,7 @@ function flock(birds: Bird[], w: number, h: number, t: number) {
           const dy = o.y - b.y;
           const d2 = dx * dx + dy * dy;
           if (d2 > cell * cell) continue;
-          cxs += o.x; cys += o.y; vxs += o.vx; vys += o.vy; c++;
+          cxs += o.x; cys += o.y; vxs += velocities.get(o)![0]; vys += velocities.get(o)![1]; c++;
           if (d2 < 64) { sx -= dx / (d2 + 1); sy -= dy / (d2 + 1); }
         }
       }
@@ -201,15 +205,22 @@ function flock(birds: Bird[], w: number, h: number, t: number) {
       b.vx += (cxs / c - b.x) * 0.004 + (vxs / c - b.vx) * 0.06;
       b.vy += (cys / c - b.y) * 0.004 + (vys / c - b.vy) * 0.06;
     }
-    b.vx += sx * 1.4 + (ax - b.x) * 0.0009;
-    b.vy += sy * 1.4 + (ay - b.y) * 0.0009;
+    const wave = t / 700 + b.phase + b.x / 180;
+    b.vx += sx * 1.4 + (ax - b.x) * 0.0009 + Math.cos(wave) * 0.12;
+    b.vy += sy * 1.4 + (ay - b.y) * 0.0009 + Math.sin(wave * 1.3) * 0.16;
+    b.vx = oldVx + (b.vx - oldVx) * (1 - gather) * dt;
+    b.vy = oldVy + (b.vy - oldVy) * (1 - gather) * dt;
+    b.vx += ((b.tx - b.x) * 0.045 - b.vx * 0.38) * gather * dt;
+    b.vy += ((b.ty - b.y) * 0.045 - b.vy * 0.38) * gather * dt;
     const s = Math.hypot(b.vx, b.vy);
-    const max = 4.2, min = 2.2;
+    const max = 4.2 + gather * 10, min = 2.2 * (1 - gather);
     const k = s > max ? max / s : s < min ? min / (s || 1) : 1;
     b.vx *= k;
     b.vy *= k;
-    b.x += b.vx;
-    b.y += b.vy;
+  }
+  for (const b of birds) {
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
   }
 }
 

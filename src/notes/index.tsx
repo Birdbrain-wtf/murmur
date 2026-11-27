@@ -33,7 +33,7 @@ import {
   type VaultEntry,
 } from "../lib/sensemaking";
 import SharedEditor from "./SharedEditor";
-import { edition } from "../edition";
+import { edition, shaped } from "../edition";
 import { shareNote, withdrawNote } from "../lib/share";
 import { approve } from "../identity/participation";
 import {
@@ -117,15 +117,23 @@ function load(): LocalNote[] {
 /** The invented demo's sample member thinks across all her groups, here and nowhere else. */
 function sampleNotes(): LocalNote[] {
   const day = 86_400_000;
+  const tag = (shaped?.name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const now = Date.now();
   const n = (i: number, type: NoteType, body: string, intent: string, tags: string[]): LocalNote => ({
     id: `sample-${i}`, body, intent, tags, people: [], type, ts: now - i * day, synced: false,
   });
   return [
     n(0, "note", "Halfmoon's second film: the interviews sound boxy. Try the hall at Northside, it's quiet on weekday mornings.", "Ask the hall before I suggest it.", ["halfmoon", "northside"]),
-    n(1, "quote", "“Ten minutes each, kind and honest.”", "Keep this for the call's page.", ["huxley"]),
-    n(2, "note", "The roof piece needs the three quotes side by side, not in a list. People skim lists.", "Before it goes in the Review.", ["huxley", "roof"]),
-    n(4, "link", "https://www.gov.uk/guidance/venture-capital-schemes-raise-money-by-offering-tax-reliefs-to-investors", "SEIS limits, for the company piece.", ["seis"]),
+    ...(shaped
+      ? [
+          n(1, "quote", `“${shaped.call.line}”`, "Keep this for the call's page.", [tag]),
+          n(2, "note", "Put the figures side by side, not in a list. People skim lists.", `Before it goes to ${shaped.publication.name}.`, [tag]),
+        ]
+      : [
+          n(1, "quote", "“Ten minutes each, kind and honest.”", "Keep this for the call's page.", ["huxley"]),
+          n(2, "note", "The roof piece needs the three quotes side by side, not in a list. People skim lists.", "Before it goes in the Review.", ["huxley", "roof"]),
+          n(4, "link", "https://www.gov.uk/guidance/venture-capital-schemes-raise-money-by-offering-tax-reliefs-to-investors", "SEIS limits, for the company piece.", ["seis"]),
+        ]),
     n(6, "note", "Common Loaf: could the vote on the new bread supplier happen on phones, not just at the meeting?", "Raise at the general meeting.", ["loaf"]),
   ];
 }

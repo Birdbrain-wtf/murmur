@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ArrowRight, ArrowUpRight, Check, MessageSquare, Sparkles } from "lucide-react";
 import { getModule } from "../host/registry";
 import { edition, shaped } from "../edition";
+import { seatRole, seatSees } from "./seeas";
 import { inkOf, onInk } from "./ink";
 import { monthTotal } from "./costs";
 import { sampleInitiatives, samplePublication } from "./sample";
@@ -91,7 +92,7 @@ const DAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", 
 
 function packTiles(installed: string[]): Tile[] {
   const s = shaped!;
-  const has = (id: string) => installed.includes(id) && !!getModule(id);
+  const has = (id: string) => installed.includes(id) && !!getModule(id) && seatSees(id);
   const open = s.initiatives.findIndex((i) => i.status === "open" && i.target > 0);
   const piece = s.publication.pieces[0];
   const by: Record<string, Tile | null> = {
@@ -124,16 +125,18 @@ function packTiles(installed: string[]): Tile[] {
     by[id] = has(id) ? { id, label: m.title, value: cap(item?.status || "new"), line: item ? `${item.title}${/[.?!]$/.test(item.title) ? "" : "."} ${item.detail}` : m.tagline } : null;
   });
   // In rail order, so the read looks like the group's own app. Six fill the grid.
-  const out = s.plugins.map((p) => by[p]).filter((t): t is Tile => !!t).slice(0, 5);
+  const out = s.plugins.map((p) => by[p]).filter((t): t is Tile => !!t);
   out.push({ id: "identity", section: "asked", label: "Asked of you", value: "2 questions", line: "£80 and £60 offered for what you know." });
   return out;
 }
 
 function packJobs(): Job[] {
   const s = shaped!;
-  if (s.brief?.jobs?.length) return s.brief.jobs;
+  // Each seat has its own week: its own jobs if the pack wrote them, else the group's that it can see.
+  if (seatRole?.jobs?.length) return seatRole.jobs.filter((j) => seatSees(j.place));
+  if (s.brief?.jobs?.length) return s.brief.jobs.filter((j) => seatSees(j.place));
   const out: Job[] = [];
-  const has = (id: string) => s.plugins.includes(id);
+  const has = (id: string) => s.plugins.includes(id) && seatSees(id);
   if (has("meet")) out.push({ ask: `Draft the ${s.call.name} running order`, done: `Done. Ten minutes each for six people, Carol first as she leaves early. It's in Work in progress.`, place: "meet" });
   const piece = s.publication.pieces[0];
   if (has("magazine") && piece)
@@ -146,7 +149,7 @@ function packJobs(): Job[] {
 const jobs = (): Job[] => (shaped ? packJobs() : HUXLEY_JOBS);
 const readLine = (): string =>
   shaped
-    ? shaped.brief?.read || `Morning. ${["Nothing", "One thing", "Two things", "Three things"][jobs().length] ?? "A few things"} ${jobs().length === 1 ? "needs" : "need"} you this week. Here's the rest of ${shaped.name} at a glance.`
+    ? seatRole?.read || (seatRole === shaped.roles[0] && shaped.brief?.read) || `Morning. ${["Nothing", "One thing", "Two things", "Three things"][jobs().length] ?? "A few things"} ${jobs().length === 1 ? "needs" : "need"} you this week. Here's the rest of ${shaped.name} at a glance.`
     : "Morning. Three things need you: the investors' agreement, Thursday's running order and four thank-yous.";
 
 export function Brief({
@@ -310,7 +313,7 @@ export function Horizon({
         <span className="font-tight text-[15px] font-medium">How you'll use {name}</span>
       </div>
       <p className="mt-1 max-w-prose text-[13px] leading-relaxed text-[var(--muted)]">
-        Three stages. The app starts as a screen for each thing and becomes mostly a conversation. Tap a stage to see it.
+        Explore the sections, preview your weekly summary, or try a sample request.
       </p>
 
       <div className="mt-4 grid gap-2.5 sm:grid-cols-3" role="tablist">
@@ -342,15 +345,13 @@ export function Horizon({
       <div className="mt-5">
         {at === "today" && (
           <p className="font-serif max-w-prose text-[16px] leading-relaxed">
-            The app today, as the walkthrough shows it. Each thing {name} does has its own screen in the rail on the left: chat, the call,
-            the money, the books and the plugins made for {name}. You open the one you need.
+            Open a section from the menu on the left, or the bottom bar on your phone. {shaped && <>Use “See it as” to explore what different members of {name} can access.</>}
           </p>
         )}
         {at === "next" && (
           <>
             <p className="mb-4 max-w-prose text-[13px] leading-relaxed text-[var(--muted)]">
-              Next, this page opens on a read of all of it, written for you. Here is a sample week for {name}. Tap a tile to jump into its
-              section, or ask for a job below.
+              A sample week for {name}. Open a section below or try one of the suggested requests.
             </p>
             <Brief installed={installed} open={open} say={say} />
           </>

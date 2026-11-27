@@ -22,7 +22,7 @@
 /** App-level keys, shared by every collective in the window. */
 const ACTIVE_KEY = "murmur.collective.v1";
 const JOINED_KEY = "murmur.collectives.v1";
-const GLOBAL = new Set([ACTIVE_KEY, JOINED_KEY, "murmur.whats-new.v1"]);
+const GLOBAL = new Set([ACTIVE_KEY, JOINED_KEY, "murmur.whats-new.v1", "murmur.theme.v1", "murmur.rail.collapsed.v1"]);
 
 const store = typeof localStorage !== "undefined" ? localStorage : null;
 const rawGet = store ? Object.getPrototypeOf(store).getItem as Storage["getItem"] : null;

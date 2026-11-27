@@ -92,13 +92,17 @@ export interface Initiative {
   target: number;
   raised: number;
   status: "open" | "funded" | "proposed";
+  /** a picture for it on Fundraise, when no piece in the publication carries one */
+  art?: { src: string; alt: string; by?: string; credit?: string };
 }
 
 export interface Made {
   title: string;
   tagline: string;
   icon: IconName;
-  sections: { label: string; items: { title: string; detail: string; status?: string }[] }[];
+  /** an item may carry `date`: a day ("2026-12-06"), several possible days, or a month alone ("2027-01");
+   *  `end` makes it a run of days. A plugin with dated items is drawn as a calendar (`./year.tsx`). */
+  sections: { label: string; items: { title: string; detail: string; status?: string; date?: string | string[]; end?: string }[] }[];
   /** a pack only: the picture at the top of the plugin */
   hero?: Art;
   /** a pack only: a live experiment on one of our own sites, played inside the plugin */
@@ -154,6 +158,18 @@ export interface Profile {
   releases: Release[];
 }
 
+/** A kind of member. A pack may also say what the agent tells that kind of member (`read`,
+ *  `jobs`, `asks`), so the sketch can be seen from each seat (`demo/seeas.ts`). */
+export interface Role {
+  name: string;
+  who: string;
+  line: string;
+  levels: Record<string, Level>;
+  read?: string;
+  jobs?: { ask: string; done: string; place: string }[];
+  asks?: { q: string; a: string }[];
+}
+
 export interface Shape {
   /** what the visitor typed; kept on their computer, never on ours */
   asked: string;
@@ -173,7 +189,7 @@ export interface Shape {
   initiatives: Initiative[];
   call: { name: string; cadence: string; line: string; weekday: number; hour: number };
   rooms: string[];
-  roles: { name: string; who: string; line: string; levels: Record<string, Level> }[];
+  roles: Role[];
   made: Made[];
   /** where it is on the ladder (0 to 3, `STAGES`), and the form it would take next */
   stage: { now: number; next: Form; why: string };
@@ -289,7 +305,7 @@ export function readShape(): Shape | null {
 }
 
 /** Keys that hold what the demo looked like, cleared whenever its shape changes. */
-export const RESET = ["murmur.installed.v2", "murmur.installed.seen.v1", "murmur.tour.v1", "murmur.agent.v1", "murmur.skin.v1"];
+export const RESET = ["murmur.seeas.v1", "murmur.installed.v2", "murmur.installed.seen.v1", "murmur.tour.v1", "murmur.agent.v1", "murmur.skin.v1"];
 
 /** Become the sketched organisation: save it and reload, so every surface reads it. */
 export function applyShape(s: Shape) {
@@ -330,10 +346,11 @@ const PEOPLE = ["Alice", "Bob", "Carol"];
 const person = (v: unknown, i: number) => pick(v, PEOPLE, PEOPLE[i % 3]);
 
 /** Clamp anything (the model's answer, a stored sketch) into a Shape the app can draw. */
-export function normaliseShape(raw: unknown, asked: string, base: Shape): Shape {
+export function normaliseShape(raw: unknown, asked: string, base: Shape, wide = false): Shape {
   const r = obj(raw);
   // Up to four: a pack may carry an artist pages plugin beside the three it had.
-  const madeRaw = arr(r.made).slice(0, 4).map(obj);
+  // A pack told from several seats (`wide`) may carry eight, since no one seat sees them all.
+  const madeRaw = arr(r.made).slice(0, wide ? 8 : 4).map(obj);
   const made: Made[] = madeRaw
     .map((m) => ({
       title: str(m.title, 22),
@@ -347,7 +364,16 @@ export function normaliseShape(raw: unknown, asked: string, base: Shape): Shape 
           items: arr(s.items)
             .slice(0, 5)
             .map(obj)
-            .map((it) => ({ title: str(it.title, 70), detail: str(it.detail, 180), status: str(it.status, 20) || undefined }))
+            .map((it) => {
+              const days = (Array.isArray(it.date) ? it.date : [it.date]).filter((d): d is string => typeof d === "string" && /^\d{4}-\d{2}(-\d{2})?$/.test(d));
+              const end = typeof it.end === "string" && /^\d{4}-\d{2}-\d{2}$/.test(it.end) ? it.end : undefined;
+              return {
+                title: str(it.title, 70),
+                detail: str(it.detail, 180),
+                status: str(it.status, 20) || undefined,
+                ...(days.length ? { date: days.length === 1 ? days[0] : days, end } : {}),
+              };
+            })
             .filter((it) => it.title),
         }))
         .filter((s) => s.items.length),
@@ -362,7 +388,9 @@ export function normaliseShape(raw: unknown, asked: string, base: Shape): Shape 
       const status = pick(i.status, ["open", "funded", "proposed"] as const, n === 0 ? "open" : "proposed");
       const raised =
         status === "funded" ? Math.round(target * 1.04) : status === "open" ? num(i.raised, 0, target, Math.round(target * 0.45)) : 0;
-      return { title: str(i.title, 70), ask: str(i.ask, 220), target, raised, status };
+      const a = obj(i.art);
+      const art = str(a.src, 200) && str(a.alt, 200) ? { src: str(a.src, 200), alt: str(a.alt, 200), credit: str(a.credit, 80) || undefined } : undefined;
+      return { title: str(i.title, 70), ask: str(i.ask, 220), target, raised, status, ...(art ? { art } : {}) };
     })
     .filter((i) => i.title);
 
@@ -416,20 +444,40 @@ export function normaliseShape(raw: unknown, asked: string, base: Shape): Shape 
   plugins = [...madeIds, ...plugins];
 
   const ids = [...plugins, "agent"];
-  const roles = arr(r.roles)
-    .slice(0, 4)
+  const roles: Role[] = arr(r.roles)
+    .slice(0, wide ? 6 : 4)
     .map(obj)
     .map((x, n) => {
       const given = obj(x.levels);
       const levels: Record<string, Level> = {};
-      // The most trusted people can always run everything.
-      for (const id of ids) levels[id] = n === 0 ? "run" : pick(given[id], LEVELS, defaultLevel(id, n));
-      return {
+      // The most trusted people can always run everything. A pack may still keep them out of
+      // a section that belongs to someone else (a committee does not read the office's inbox).
+      for (const id of ids) levels[id] = n === 0 && !(wide && given[id]) ? "run" : pick(given[id], LEVELS, defaultLevel(id, n));
+      const role: Role = {
         name: plural(cap(str(x.name, 24))),
-        who: n === 0 ? "Alice and 2 others" : n === 1 ? `Bob and ${Math.max(2, Math.round(num(r.size, 2, 5000, 20) * 0.6))} others` : n === 2 ? "Carol and 3 others" : "invited one at a time",
+        who:
+          (wide && str(x.who, 30)) ||
+          (n === 0 ? "Alice and 2 others" : n === 1 ? `Bob and ${Math.max(2, Math.round(num(r.size, 2, 5000, 20) * 0.6))} others` : n === 2 ? "Carol and 3 others" : "invited one at a time"),
         line: str(x.line, 70),
         levels,
       };
+      if (!wide) return role;
+      // What the agent says to someone in this seat: only a pack writes these.
+      const read = str(x.read, 160);
+      const jobs = arr(x.jobs)
+        .map(obj)
+        .map((j) => ({ ask: str(j.ask, 60), done: str(j.done, 200), place: str(j.place, 20) }))
+        .filter((j) => j.ask && j.done && plugins.includes(j.place) && levels[j.place] !== "none")
+        .slice(0, 3);
+      const asks = arr(x.asks)
+        .slice(0, 3)
+        .map(obj)
+        .map((a) => ({ q: str(a.q, 80), a: str(a.a, 600) }))
+        .filter((a) => a.q && a.a);
+      if (read) role.read = read;
+      if (jobs.length) role.jobs = jobs;
+      if (asks.length) role.asks = asks;
+      return role;
     })
     .filter((x) => x.name);
 
@@ -867,7 +915,7 @@ export function normalisePack(raw: unknown): Shape {
   const base = composeShape(`${str(r.summary, 200)} ${asked}`);
   const m = obj(r.member);
   const out: Shape = {
-    ...normaliseShape(raw, asked, base),
+    ...normaliseShape(raw, asked, base, true),
     source: "pack",
     member: { kind: str(m.kind, 28, "Member"), role: str(m.role, 40, "a member"), line: str(m.line, 120) },
   };
@@ -905,7 +953,7 @@ export function normalisePack(raw: unknown): Shape {
   const inks = arr(look.inks).map(hex);
   if (hex(look.paper) && inks.length === 3 && inks.every(Boolean)) {
     out.look = { paper: hex(look.paper), inks: inks as Look["inks"] };
-    const palette = arr(look.palette).map(hex).filter(Boolean).slice(0, 8);
+    const palette = arr(look.palette).map(hex).filter(Boolean).slice(0, 12);
     if (palette.length) out.look.palette = palette;
   }
   return out;

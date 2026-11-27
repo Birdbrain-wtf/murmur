@@ -22,7 +22,7 @@ const LIGHT = new Set(["#ffd400", "#e0a800"]);
 
 // A group's pack may bring its own section colours (`look.palette`); they go
 // round the sections in rail order, so neighbours never share one.
-const ORDER = ["agent", "made-1", "made-2", "magazine", "fundraise", "meet", "chat", "structure", "operations", "spend", "notes", "identity", "settings", "how"];
+const ORDER = ["agent", "made-1", "made-2", "magazine", "fundraise", "meet", "chat", "structure", "operations", "spend", "notes", "identity", "settings", "how", "made-3", "made-4", "made-5", "made-6", "made-7", "made-8"];
 const OWN = shaped?.look?.palette;
 
 export function inkOf(id: string): string {

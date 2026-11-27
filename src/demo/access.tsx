@@ -2,6 +2,7 @@ import { useState } from "react";
 import { edition, shaped } from "../edition";
 import { getModule } from "../host/registry";
 import { demoNote } from "./note";
+import { seat, sitAs } from "./seeas";
 
 /**
  * Who can use what, as a sample (demo editions only). Each plugin a collective
@@ -52,9 +53,9 @@ const SAMPLE: Record<string, Level[]> = shaped
   ? Object.fromEntries(["agent", ...shaped.plugins].map((id) => [id, shaped!.roles.map((r) => r.levels[id] ?? "see")]))
   : HUXLEY_LEVELS;
 
-/** Alice is a steward. */
-export const sampleRole = ROLES[0];
-export const levelFor = (plugin: string): Level => SAMPLE[plugin]?.[0] ?? "join";
+/** Alice is a steward, or whoever the sketch is being seen as (`./seeas.ts`). */
+export const sampleRole = ROLES[seat] ?? ROLES[0];
+export const levelFor = (plugin: string): Level => SAMPLE[plugin]?.[shaped ? seat : 0] ?? "join";
 export const labelOf = (l: Level) => LEVELS.find((x) => x.id === l)!.label;
 
 const next = (l: Level): Level => LEVELS[(LEVELS.findIndex((x) => x.id === l) + 1) % LEVELS.length].id;
@@ -78,7 +79,7 @@ export function AccessTable({ installed }: { installed: string[] }) {
         {shaped
           ? `${ROLES[0].name} can run everything, and ${ROLES[ROLES.length - 1].name.toLowerCase()} see only what they're given.`
           : "A resident joins calls but can't read the books. An investor sees the company's books, not the members' chat."}{" "}
-        Tap a level to change it.
+        Tap a level to change it.{shaped && ROLES.length > 1 ? " Tap a name to see the app from that seat." : ""}
       </p>
 
       <div className="overflow-x-auto rounded-[var(--radius)] border border-[var(--line)]">
@@ -86,12 +87,25 @@ export function AccessTable({ installed }: { installed: string[] }) {
           <thead>
             <tr className="border-b border-[var(--line)]">
               <th className="px-3 py-2.5 font-normal text-[var(--faint)]">Plugin</th>
-              {ROLES.map((r) => (
-                <th key={r.id} className="px-2 py-2.5 align-bottom font-normal" title={r.line}>
-                  <div className="font-tight text-[13px] font-medium text-[var(--fg)]">{r.name}</div>
-                  <div className="text-[11px] text-[var(--faint)]">{r.who}</div>
-                </th>
-              ))}
+              {ROLES.map((r, i) => {
+                const here = !!shaped && i === seat;
+                return (
+                  <th key={r.id} className="px-2 py-2.5 align-bottom font-normal" title={r.line} aria-current={here || undefined}>
+                    {shaped ? (
+                      <button
+                        onClick={() => sitAs(i)}
+                        disabled={here}
+                        className={`text-left font-tight text-[13px] font-medium text-[var(--fg)] ${here ? "" : "underline decoration-[var(--line-strong)] underline-offset-4 hover:decoration-[var(--fg)]"}`}
+                      >
+                        {r.name}
+                      </button>
+                    ) : (
+                      <div className="font-tight text-[13px] font-medium text-[var(--fg)]">{r.name}</div>
+                    )}
+                    <div className="text-[11px] text-[var(--faint)]">{here ? "you, in this sketch" : r.who}</div>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>

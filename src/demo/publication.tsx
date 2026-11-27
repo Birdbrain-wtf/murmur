@@ -277,18 +277,18 @@ export function PublicationPanel({ open }: PluginContext) {
               )
             }
           >
-            Write for the next issue
+            Write a piece
           </Button>
         }
       />
-      <PageBody>
+      <PageBody width={piece ? "read" : "wide"}>
         {piece ? (
           <Reading piece={piece} back={() => setReading(null)} open={open} />
         ) : (
           <>
             <Notice>
-              {name}'s own publication. Ideas are argued here first
-              {raises ? ", and the agreed ones become initiatives" : ", before anything is decided"}. Sample pieces and people.
+              News and ideas from {name}
+              {raises ? ". Follow a story to see what it funds" : ". Open a story to read and reply"}.
             </Notice>
 
             <figure
@@ -351,7 +351,7 @@ export function PublicationPanel({ open }: PluginContext) {
               </div>
               <div className="flex flex-col border-t-[6px] px-6 py-6 sm:border-l-[6px] sm:border-t-0" style={{ borderColor: inkOf(lead) }}>
                 <div className="font-mono text-[11px] uppercase tracking-wide text-[var(--faint)]">
-                  Lead · {lead.minutes} min
+                  Read story · {lead.minutes} min
                 </div>
                 <h2 className="font-tight mt-2 text-[24px] font-medium leading-tight tracking-[-0.01em]">{lead.title}</h2>
                 <p className="mt-2 text-[15px] leading-relaxed text-[var(--muted)]">{lead.dek}</p>

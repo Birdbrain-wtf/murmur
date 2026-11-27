@@ -75,7 +75,7 @@ export function PageBody({
 }) {
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-5 pt-6 pb-20 md:px-8">
-      <div className={cx(WIDTH[width], "space-y-8", className)}>{children}</div>
+      <div data-width={width} className={cx(WIDTH[width], "page-body-content space-y-8", className)}>{children}</div>
     </div>
   );
 }
@@ -213,7 +213,7 @@ export function Notice({ tone = "idle", children }: { tone?: Tone; children: Rea
   const colour = tone === "danger" ? "var(--danger)" : tone === "ok" ? "var(--ok)" : "var(--muted)";
   return (
     <p className="flex items-start gap-2 text-[13px] leading-relaxed" style={{ color: colour }}>
-      <span className="mt-[7px]">
+      <span className="flex h-[1.625em] items-center">
         <Dot tone={tone} />
       </span>
       <span>{children}</span>

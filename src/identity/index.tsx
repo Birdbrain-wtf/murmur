@@ -228,7 +228,7 @@ function DemoProfile({ instance, open }: Pick<PluginContext, "instance" | "open"
             <Section
               label="Her groups"
               icon={Users}
-              lede="One tap moves her between them. Each has its own plugins and rules. Her identity, notes and record go with her."
+              lede="One tap moves her between them. Her identity, notes and record go with her."
             >
               <GroupList />
             </Section>
@@ -276,11 +276,7 @@ function DemoProfile({ instance, open }: Pick<PluginContext, "instance" | "open"
             <div className="mt-4 space-y-2 text-[13px] leading-relaxed text-[var(--muted)]">
               <p>
                 Each contribution carries who made it and what they agreed to. Together, that is proof of original
-                judgement, freely shared. AI has nothing scarcer.
-              </p>
-              <p>
-                It lets {name} set terms as one group and share what comes back by what each person put in. The aim
-                is a public intelligence that answers to the people who made it, and could pay them.
+                judgement, which AI is short of. It lets {name} set its terms as one group.
               </p>
             </div>
             <p className="mt-3 text-[12px] text-[var(--faint)]">
@@ -292,7 +288,7 @@ function DemoProfile({ instance, open }: Pick<PluginContext, "instance" | "open"
         <Section
           label={`What Alice can do in ${name}`}
           icon={Landmark}
-          lede={`Alice is one of ${name}'s ${sampleRole.name.toLowerCase()}, who ${sampleRole.line}. Others' levels are under Plugins, "Who can use what".`}
+          lede={`Alice is one of ${name}'s ${sampleRole.name.toLowerCase()}, who ${sampleRole.line.charAt(0).toLowerCase()}${sampleRole.line.slice(1)}. Others' levels are under Plugins, "Who can use what".`}
         >
           <List>
             {ACCESS_PLUGINS.filter((id) => getModule(id)).map((id) => (
@@ -347,8 +343,7 @@ function DemoProfile({ instance, open }: Pick<PluginContext, "instance" | "open"
             {edition.showcase && !packed
               ? "In your group's own app, each member signs in with a passkey at your own address. "
               : `Next for ${name}: each member gets a passkey login at ${site}. `}
-            One tap, nothing to remember. Then chat, calls and the agent go live, and Operations reads your real
-            books.
+            One tap, nothing to remember. Then chat, calls and the agent go live.
           </p>
           <div className="mt-3">
             <Button variant="primary" size="md" icon={Mail} onClick={askForLogins}>

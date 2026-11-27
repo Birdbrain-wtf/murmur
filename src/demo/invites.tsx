@@ -28,7 +28,7 @@ const FUND = RATE - RUNNING - LINE.reduce((a, b) => a + b, 0);
 
 const INK = [RISO.blue, RISO.pink, "#e0a800"];
 const NAMES = ["Bob", "Carol", "Dave", "Erin", "Frank", "Grace"];
-const WHERE = ["Huxley", "Halfmoon Pictures", "Northside Commons", "Common Loaf"];
+const WHERE = [edition.instance.name, "Halfmoon Pictures", "Northside Commons", "Common Loaf"];
 
 const gbp = (n: number, pence = n < 10) =>
   new Intl.NumberFormat("en-GB", {

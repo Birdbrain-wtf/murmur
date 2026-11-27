@@ -31,7 +31,7 @@ export interface OpsMe {
   who: { handle: string; name: string } | null;
   brand: string;
   company: string;
-  views: { accounts?: boolean; position?: boolean; shares?: boolean; raise?: boolean; incubation?: boolean; duties?: boolean; connections?: boolean; files?: boolean; investor?: boolean };
+  views: { accounts?: boolean; position?: boolean; shares?: boolean; raise?: boolean; incubation?: boolean; duties?: boolean; connections?: boolean; files?: boolean; investor?: boolean; inbox?: boolean };
 }
 
 /** member: the app's own sign-in opened the console. pair: a console-only token. */
@@ -74,7 +74,8 @@ const set = (s: State) => {
 };
 
 export class OpsError extends Error {
-  constructor(message: string, readonly status: number) {
+  /** detail: what the voice gate said, when a reply needs a rewrite before it goes */
+  constructor(message: string, readonly status: number, readonly detail?: string) {
     super(message);
   }
 }
@@ -114,6 +115,24 @@ export async function investorSign(body: Record<string, unknown>): Promise<{ ok:
     throw new OpsError("Not signed: this is a demo.", 400);
   }
   const r = await call("/api/ops/investor/sign", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new OpsError(j.error || `The console answered ${r.status}`, r.status);
+  return j;
+}
+
+/** POST to the console: the Inbox's own housekeeping (archive), never a change that leaves it. */
+export async function opsPost<T>(path: string, body: unknown): Promise<T> {
+  if (demo) throw new OpsError("Not in a demo.", 400);
+  const r = await call(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new OpsError(j.error || `The console answered ${r.status}`, r.status);
+  return j as T;
+}
+
+/** Hand the console a file to attach to an email. It keeps it for two hours. */
+export async function opsStage(file: File): Promise<{ id: string; name: string; size: number; type: string }> {
+  if (demo) throw new OpsError("Not in a demo.", 400);
+  const r = await call("/api/ops/inbox/stage", { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream", "X-Filename": encodeURIComponent(file.name) }, body: file });
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new OpsError(j.error || `The console answered ${r.status}`, r.status);
   return j;
@@ -264,7 +283,7 @@ export type Proposal = { status: "approved" | "declined" | "failed" | "expired" 
  * then simply runs out on the console).
  */
 export async function proposeChange(
-  kind: "incubation.place" | "duty.close",
+  kind: "incubation.place" | "duty.close" | "mail.send",
   target: string,
   change: Record<string, unknown>,
   opts: { onOpen?: (url: string) => void; stop?: AbortSignal } = {},
@@ -275,7 +294,7 @@ export async function proposeChange(
   }
   const r = await call("/api/ops/app/draft", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, target, change, ...(kind === "incubation.place" ? { ladder: 5 } : {}) }) });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new OpsError(j.error || `The console answered ${r.status}`, r.status);
+  if (!r.ok) throw new OpsError(j.error || `The console answered ${r.status}`, r.status, j.voice);
   const url = `${base}${j.url}`;
   opts.onOpen?.(url);
   await openInBrowser(url);

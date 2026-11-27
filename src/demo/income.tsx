@@ -1,5 +1,5 @@
 import { ArrowDownLeft, ArrowUpRight, CheckCircle2, Coins, Cpu, KeyRound, Lightbulb, Lock, Palette, Route, Send, Users, Wallet, Wrench } from "lucide-react";
-import { edition, showcaseName } from "../edition";
+import { edition, packShape, packed, showcaseName } from "../edition";
 import { Card, Section } from "../ui";
 import { GROUPS } from "./groups";
 import { RISO } from "./sample";
@@ -39,8 +39,9 @@ interface Stream {
 const STREAMS: Stream[] = [
   {
     key: "sessions",
-    label: `${home} Sessions Ltd`,
-    how: "Sessions she led, paid when the school signs the session off",
+    // Huxley's sessions became a company. A group's sketch says only that she was paid for work.
+    label: packed ? `Paid work for ${home}` : `${home} Sessions Ltd`,
+    how: packed ? "Jobs she did for the group, paid when they are signed off" : "Sessions she led, paid when the school signs the session off",
     ink: RISO.yellow,
     months: [0, 0, 0, 60, 120, 120, 180, 120, 0, 180, 240, 240],
   },
@@ -54,7 +55,7 @@ const STREAMS: Stream[] = [
   {
     key: "licence",
     label: "Her pieces, licensed",
-    how: `Her share when ${home} licenses the Review, on terms members agreed`,
+    how: `Her share when ${home} licenses ${packShape?.publication.name ?? "the Review"}, on terms members agreed`,
     ink: RISO.pink,
     months: [0, 0, 0, 0, 0, 38, 0, 0, 44, 0, 0, 51],
   },
@@ -102,11 +103,11 @@ const OUT: { what: string; amount: number; atSource?: boolean }[] = [
 ];
 
 const RECENT: { day: string; what: string; amount: number; stream: string }[] = [
-  { day: "11 Oct", what: "Session at St Aidan's Primary, signed off", amount: 120, stream: "sessions" },
+  { day: "11 Oct", what: packed ? `A job for ${home}, signed off` : "Session at St Aidan's Primary, signed off", amount: 120, stream: "sessions" },
   { day: "9 Oct", what: "Answer: “How do you get a recording kit through safeguarding?”", amount: 54, stream: "answers" },
   { day: "7 Oct", what: "Her Mac overnight: 412 jobs for groups' agents, all spot-checked", amount: 6, stream: "compute" },
   { day: "6 Oct", what: "Common Loaf's surplus, shared out", amount: 38, stream: "loaf" },
-  { day: "3 Oct", what: "“A studio that travels”, licensed by Huxley to community radio", amount: 51, stream: "licence" },
+  { day: "3 Oct", what: packed ? `Her piece in ${packShape?.publication.name}, licensed by ${home}` : `“A studio that travels”, licensed by ${home} to community radio`, amount: 51, stream: "licence" },
   { day: "2 Oct", what: "Answer: “How did you raise for a roof with no bank account?”", amount: 72, stream: "answers" },
 ];
 const inkFor = (k: string) => STREAMS.find((s) => s.key === k)!.ink;
@@ -214,7 +215,7 @@ export function IncomeSection() {
       <Section
         label="What comes back to her"
         icon={Coins}
-        lede="Each payment would trace to work in her record and arrive once the work is signed off. No invoices. What she pays out is just as plain."
+        lede="Each payment would trace to work in her record. No invoices."
       >
         <Card>
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -317,8 +318,7 @@ export function IncomeSection() {
 
         <p className="mt-3 flex items-start gap-1.5 text-[12px] text-[var(--faint)]">
           <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          Sample figures. Nobody is paid through the network today. Each payment could be tied to signed work and seen
-          only by her.
+          Sample figures. Nobody is paid through the network today.
         </p>
       </Section>
     </div>

@@ -28,6 +28,8 @@ import { Button, Card, Empty, List, Notice, Page, PageBody, PageHeader, Row, Sec
 import { filmSrc, type Film, type IconName, type Made, type Profile, type Release, type ReleaseKind, type Shape } from "./shape";
 import { demoNote } from "./note";
 import { logoUrl } from "../host/useSkin";
+import { YearView, dated } from "./year";
+import { seatLevel, seatRole } from "./seeas";
 
 /**
  * A plugin made for one organisation's own work, sketched for a visitor's group
@@ -260,6 +262,8 @@ function panelFor(m: Made, id: string) {
   return function MadePanel(ctx: PluginContext) {
     const name = edition.instance.name;
     const [open, setOpen] = useState<string | null>(null);
+    const year = dated(m);
+    const [view, setView] = useState<"calendar" | "list">("calendar");
     const page = m.profiles?.find((p) => p.slug === open);
     if (page) return <ProfilePage p={page} plugin={m} ctx={ctx} onBack={() => setOpen(null)} />;
     return (
@@ -275,13 +279,18 @@ function panelFor(m: Made, id: string) {
                 Open on its own
               </a>
             ) : (
-              <Button onClick={() => demoNote(`In your own app this adds to ${m.title}, in ${name}'s record.`)}>
-                Add
-              </Button>
+              <>
+                {year && (
+                  <Button icon={view === "calendar" ? ClipboardList : CalendarDays} onClick={() => setView(view === "calendar" ? "list" : "calendar")}>
+                    {view === "calendar" ? "List" : "Calendar"}
+                  </Button>
+                )}
+                <Button onClick={() => demoNote(`In your own app this adds to ${m.title}, in ${name}'s record.`)}>Add item</Button>
+              </>
             )
           }
         />
-        <PageBody width={m.profiles ? "wide" : "read"}>
+        <PageBody width="wide">
           {m.live && (
             <figure className="overflow-hidden rounded-[var(--radius)] border border-[var(--line)] bg-black">
               <iframe
@@ -298,7 +307,7 @@ function panelFor(m: Made, id: string) {
           )}
           {!m.live && m.hero && !m.profiles && (
             <figure className="overflow-hidden rounded-[var(--radius)] border border-[var(--line)]">
-              <img src={logoUrl(m.hero.src)} alt={m.hero.alt} className="block aspect-[21/9] w-full object-cover" />
+              <img src={logoUrl(m.hero.src)} alt={m.hero.alt} className="block h-32 w-full object-cover sm:h-44" />
               {m.hero.credit && (
                 <figcaption className="font-mono bg-[var(--card)] px-3 py-2 text-[11px] text-[var(--faint)]">{m.hero.credit}</figcaption>
               )}
@@ -329,28 +338,39 @@ function panelFor(m: Made, id: string) {
               ))}
             </div>
           )}
-          {!m.live && <Notice>
-            {shaped?.alice || shaped?.source === "pack" ? "A plugin made for this group." : "Sketched from what you told us."} In your own app it is made to fit how {name}{" "}
-            works, and changes when that does.
-          </Notice>}
-          {m.sections.map((s) => (
-            <Section key={s.label} label={s.label}>
-              <List>
-                {s.items.map((it) => (
-                  <Row
-                    key={it.title}
-                    title={it.title}
-                    status={it.status ? <Status tone={/gap|help|wait|need|due/i.test(it.status) ? "warn" : "live"}>{it.status}</Status> : undefined}
-                    detail={it.detail}
-                  />
-                ))}
-              </List>
-            </Section>
-          ))}
+          {!m.live && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--line)] px-4 py-3 text-sm">
+              <span>{seatRole?.name ?? "Your role"} · {seatLevel(id)}</span>
+              <Button variant="quiet" onClick={() => ctx.open("identity")}>View access</Button>
+            </div>
+          )}
+          {year && view === "calendar" && <YearView m={m} />}
+          {!(year && view === "calendar") && (
+            <>
+              <nav aria-label={`${m.title} sections`} className="flex flex-wrap gap-2">
+                {m.sections.map((s, i) => <a key={s.label} href={`#${id}-section-${i}`} className="rounded-full border border-[var(--line)] px-4 py-2 text-sm hover:bg-[var(--raise)]">{s.label} · {s.items.length}</a>)}
+              </nav>
+              {m.sections.map((s, i) => (
+                <section key={s.label} id={`${id}-section-${i}`} className="scroll-mt-6 space-y-3">
+                  <h2 className="text-lg font-semibold">{s.label}</h2>
+                  <div className="grid gap-3 lg:grid-cols-2">
+                    {s.items.map((it) => (
+                      <article key={it.title} className="min-w-0 rounded-[var(--radius)] border border-[var(--line)] bg-[var(--card)] p-5">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <h3 className="text-base font-semibold">{it.title}</h3>
+                          {it.status && <Status tone={/gap|help|wait|need|due/i.test(it.status) ? "warn" : "live"}>{it.status}</Status>}
+                        </div>
+                        <p className="mt-3 max-w-prose text-sm leading-relaxed text-[var(--muted)]">{it.detail}</p>
+                      </article>
+                    ))}
+                  </div>
+                </section>
+              ))}
+            </>
+          )}
           <Card tone="dashed">
             <p className="text-[13px] leading-relaxed text-[var(--muted)]">
-              Custom plugins follow the same rules as the rest, with their own levels under "Who can use what". What
-              people add stays theirs. One made for {name} can later be offered to other groups.
+              This is a sketch. Your role determines which sections you can see. Explore permissions in Profile.
             </p>
           </Card>
         </PageBody>

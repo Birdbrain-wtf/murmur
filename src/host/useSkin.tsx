@@ -8,6 +8,7 @@ import {
   type ReactNode,
 } from "react";
 import { edition } from "../edition";
+import { isDark, onTheme } from "./theme";
 
 /**
  * Skins — a group rebrands its own Decent client.
@@ -208,15 +209,29 @@ function spectrumGradient(stops: string[]): string {
 
 /** Apply (or clear) a skin's tokens as inline props on the document root.
  *  Clearing a field removes the inline prop so styles.css's default returns. */
+/** Near-black: invisible on a dark page. */
+function isInk(c: string): boolean {
+  const m = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(c.trim());
+  if (!m) return false;
+  const h = m[1].length === 3 ? m[1].replace(/./g, (x) => x + x) : m[1];
+  const [r, g, b] = [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b < 0.22;
+}
+
+/** In dark mode a group's background and text colours are set aside (they are
+ *  chosen for white), and near-black brand colours turn light so a black-and-
+ *  orange spectrum still reads. Light mode is untouched. */
 function apply(skin: Skin) {
   const root = document.documentElement;
   const set = (prop: string, val: string | null) =>
     val ? root.style.setProperty(prop, val) : root.style.removeProperty(prop);
+  const dark = isDark();
+  const lift = (c: string) => (dark && isInk(c) ? "#ededed" : c);
 
-  set("--spectrum", skin.spectrum.length ? spectrumGradient(skin.spectrum) : null);
-  set("--accent", skin.accent || null);
-  set("--bg", skin.bg || null);
-  set("--fg", skin.fg || null);
+  set("--spectrum", skin.spectrum.length ? spectrumGradient(skin.spectrum.map(lift)) : null);
+  set("--accent", skin.accent && !(dark && isInk(skin.accent)) ? skin.accent : null);
+  set("--bg", dark ? null : skin.bg || null);
+  set("--fg", dark ? null : skin.fg || null);
   set("--radius", skin.radius != null ? `${skin.radius}px` : null);
 }
 
@@ -273,6 +288,8 @@ const SkinContext = createContext<SkinContextValue | null>(null);
 
 export function SkinProvider({ children }: { children: ReactNode }) {
   const [skin, setSkin] = useState<Skin>(load);
+
+  useEffect(() => onTheme(() => apply(skin)), [skin]);
 
   useEffect(() => {
     apply(skin);

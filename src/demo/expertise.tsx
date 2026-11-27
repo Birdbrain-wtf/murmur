@@ -1,5 +1,5 @@
 import { Inbox, Lightbulb, Lock, Route, ScrollText, Send } from "lucide-react";
-import { edition, showcaseName } from "../edition";
+import { edition, packed, showcaseName } from "../edition";
 import { Button, Card, List, Row, Section, Status } from "../ui";
 import { GROUPS } from "./groups";
 import { demoNote } from "./note";
@@ -52,7 +52,7 @@ export function ExpertiseSection() {
       <Section
         label="What she knows"
         icon={Lightbulb}
-        lede="Read from work Alice signed in every group she's in, not from a CV. Each group that saw the work vouches for it. Nobody sees this unless she shows it."
+        lede="Read from work Alice signed, not from a CV. Nobody sees this unless she shows it."
       >
         <div className="mb-4 grid grid-cols-3 gap-2">
           {(
@@ -128,7 +128,7 @@ export function AskedSection() {
       <Section
         label="Asked of her"
         icon={Inbox}
-        lede="Any group can post a challenge, and it finds people who have done it before. Alice sees a question, not who asked. The group sees an answer, not her name."
+        lede="Any group can post a challenge, and it finds people who have done it before. Neither side sees the other's name."
       >
         <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
           {HOW.map((h, i) => (
@@ -184,8 +184,9 @@ export function AskedSection() {
         <Card>
           <div className="font-tight text-sm font-medium">{home} asks too</div>
           <p className="mt-1.5 text-[13px] leading-relaxed text-[var(--muted)]">
-            At ten weeks old, {home} Sessions Ltd asked: “How should we price care-home sessions?” Three people who had
-            done it answered. {home} never learned who they were. They never saw its books.
+            {packed
+              ? `When ${home} asks, people who have done it before answer. ${home} never learns who they are, and they never see its books.`
+              : `At ten weeks old, ${home} Sessions Ltd asked: “How should we price care-home sessions?” Three people who had done it answered. ${home} never learned who they were. They never saw its books.`}
           </p>
           <p className="mt-2 text-[13px] leading-relaxed text-[var(--muted)]">
             The more groups take part, the likelier a question finds someone who has done it.

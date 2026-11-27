@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { SlidersHorizontal, Palette, Plus, X, Copy, Check, RotateCcw, KeyRound, Trash2, Lock, BookOpen, Info, PenLine, Fingerprint, Library, Receipt, Eye } from "lucide-react";
+import { SlidersHorizontal, Palette, Plus, X, Copy, Check, RotateCcw, KeyRound, Trash2, Lock, BookOpen, Info, PenLine, Fingerprint, Library, Receipt, Eye, Sun, Moon, Monitor } from "lucide-react";
 import { deleteSecret, listSecrets, persistent, saveSecret, validName, type SecretMeta } from "../lib/secrets";
 import { isTauri, getUpdateChannel, setUpdateChannel, type UpdateChannel } from "../host/useUpdater";
 import { Page, PageHeader, PageBody, Section, Card, List, Row, Status, Notice, Button, Field, Facts, inputClass } from "../ui";
@@ -17,6 +17,7 @@ import {
   EMPTY_SKIN,
   type Skin,
 } from "../host/useSkin";
+import { useTheme, type ThemeMode } from "../host/theme";
 import { app, edition } from "../edition";
 import { isDemo } from "../demo";
 import { CostsTable, monthTotal } from "../demo/costs";
@@ -114,14 +115,16 @@ function Appearance({ instance }: { instance: PluginContext["instance"] }) {
     <Section
       label="Appearance"
       icon={Palette}
-      lede="Your group's name, logo, colours and corners. Changes stay on this computer."
+      lede="Light or dark, and your group's name, logo, colours and corners. Changes stay on this computer."
       aside={
         <Button variant="quiet" icon={RotateCcw} onClick={reset}>
           Reset to {edition.productName}
         </Button>
       }
     >
-      <div className="flex flex-wrap gap-2">
+      <ThemeChoice />
+
+      <div className="mt-5 flex flex-wrap gap-2">
         {presets.map((p) => {
           const on = activePreset === p.id;
           const swatches = (p.skin.spectrum ?? DECENT_DEFAULTS.spectrum).slice(0, 4);
@@ -186,7 +189,7 @@ function Appearance({ instance }: { instance: PluginContext["instance"] }) {
                 onChange={(v) => update({ accent: v })}
               />
             </Field>
-            <Field label="Background" hint="Keep it close to white.">
+            <Field label="Background" hint="Keep it close to white. Dark mode sets it aside.">
               <ColorRow
                 value={skin.bg || DECENT_DEFAULTS.bg}
                 isDefault={!skin.bg}
@@ -214,6 +217,31 @@ function Appearance({ instance }: { instance: PluginContext["instance"] }) {
         </div>
       </details>
     </Section>
+  );
+}
+
+function ThemeChoice() {
+  const { mode, setMode } = useTheme();
+  const options: { id: ThemeMode; label: string; icon: typeof Sun }[] = [
+    { id: "light", label: "Light", icon: Sun },
+    { id: "dark", label: "Dark", icon: Moon },
+    { id: "system", label: "Same as this computer", icon: Monitor },
+  ];
+  return (
+    <div role="radiogroup" aria-label="Light or dark" className="inline-flex flex-wrap gap-1 rounded-[calc(var(--radius)+4px)] border border-[var(--line)] bg-[var(--raise)] p-1">
+      {options.map(({ id, label, icon: Icon }) => (
+        <button
+          key={id}
+          role="radio"
+          aria-checked={mode === id}
+          onClick={() => setMode(id)}
+          className="flex items-center gap-2 rounded-[var(--radius)] px-3 py-1.5 text-xs text-[var(--muted)] transition hover:text-[var(--fg)] aria-checked:bg-[var(--card)] aria-checked:text-[var(--fg)] aria-checked:shadow-[0_0_0_1px_var(--line-strong)]"
+        >
+          <Icon className="h-3.5 w-3.5" />
+          {label}
+        </button>
+      ))}
+    </div>
   );
 }
 
@@ -458,7 +486,7 @@ function LedgerSection() {
     <Section
       label="The ledger"
       icon={BookOpen}
-      lede="Who joined, who made what, how it may be used, how votes went. Many computers hold copies and check each other, so nobody, including us, can quietly change it."
+      lede="Who joined, who made what, how it may be used, how votes went. Nobody, including us, can quietly change it."
     >
       <div className="mb-4 grid grid-cols-1 gap-2 sm:grid-cols-3">
         {STEPS.map((step, i) => (

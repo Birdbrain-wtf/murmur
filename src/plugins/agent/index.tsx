@@ -804,7 +804,9 @@ function Exchange({ q, children }: { q: string; children: ReactNode }) {
 function Answer({ text, actions, open }: { text: string; actions?: string[]; open: (id: string) => void }) {
   return (
     <>
-      <p className="font-serif whitespace-pre-wrap text-[15px] leading-relaxed">{text}</p>
+      <p className="font-serif whitespace-pre-wrap text-[15px] leading-relaxed">
+        {text.split(/\*\*([^*\n]+)\*\*/g).map((part, i) => (i % 2 ? <strong key={i} className="font-semibold">{part}</strong> : part))}
+      </p>
       {!!actions?.length && (
         <div className="mt-3 flex flex-wrap gap-2">
           {actions.map((a) => (

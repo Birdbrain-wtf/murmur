@@ -14,10 +14,12 @@ import { demoNote } from "../../demo/note";
 /**
  * Watch: the Four To The Floor channel, inside the app (rich, 2026-10-17).
  *
- * The screen is Flipside, FTTF's Lab 06 (`orbits/fttf/site/lab/06-flipside/`),
- * served for the app at `<origin>/watch/`: a channel already on air, and the
- * people behind it when the screen turns round. The plugin frames it edge to
- * edge and adds nothing of its own.
+ * The screen is Continuity, FTTF's Lab 10 (`orbits/fttf/site/lab/10-continuity/`),
+ * served for the app at `<origin>/watch/` since 2026-11-11 (rich): one channel on
+ * a shared clock, programmes on the mark, nothing to skip. Lab 06 Flipside held
+ * the slot from 2026-10-17. Continuity sends no messages, so the session hand-over
+ * below is idle until a screen that uses it comes back. The plugin frames it edge
+ * to edge and adds nothing of its own.
  *
  * Sign-in stays the app's. The frame never asks for a passkey: the app hands it
  * the session it already holds (email or passkey at FTTF's door, approved through

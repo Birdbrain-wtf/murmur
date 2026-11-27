@@ -2,6 +2,7 @@
 import { app } from "./edition";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import "./host/theme";
 import App from "./host/App";
 import { Intro } from "./host/Intro";
 import { IdentityProvider } from "./identity/useIdentity";

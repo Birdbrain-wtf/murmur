@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link2, ExternalLink } from "lucide-react";
 import { edition } from "../../edition";
 import type { MurmurPlugin, PluginContext } from "../../host/types";
@@ -7,7 +7,8 @@ import { openInBrowser } from "../../identity/passkey";
 import { PasskeySignIn } from "../../identity/SignIn";
 import { sessionRejected } from "../../identity/session";
 import { useIdentity } from "../../identity/useIdentity";
-import { hasHub, checked, hubClient } from "../../lib/hub";
+import { hasHub, checked, hubClient, type Chain } from "../../lib/hub";
+import { CallBuilder, ChainBrowser, ChainPicker } from "./chains";
 import { countMembers } from "../../lib/kreivo";
 import { Button, Card, Empty, Facts, List, Notice, Page, PageBody, PageHeader, Row, Section, Status, Waiting } from "../../ui";
 
@@ -20,7 +21,17 @@ import { Button, Card, Empty, Facts, List, Notice, Page, PageBody, PageHeader, R
  * in public. Inside the app a member also sees who else is in the group: the app
  * sends its session, the door checks on chain that the member holds a membership,
  * and only then are names joined to holders.
+ *
+ * Two more tabs read any chain the app follows directly, through the light
+ * client on this computer (./chains.tsx): live blocks, accounts, storage and
+ * constants. In Birdbrain a third builds any call the chain takes and hands it
+ * to the app's signer, which shows the member what it does before signing.
+ * Signing works on the test network only for now (lib/signer.ts, `signable`).
  */
+
+/** The call builder is a power tool: Birdbrain first (the lab). */
+const BUILDS = edition.id === "murmur";
+type Tab = "group" | "chains" | "build";
 
 const base = edition.explorer?.base ?? null;
 
@@ -85,7 +96,7 @@ function Recount({ community, claimed }: { community: number; claimed: number })
 
 const short = (a: string) => (a.length > 20 ? `${a.slice(0, 8)}…${a.slice(-6)}` : a);
 
-function Panel({ identity }: PluginContext) {
+function GroupView({ identity, switcher }: PluginContext & { switcher: ReactNode }) {
   const { signIn } = useIdentity();
   const [data, setData] = useState<Explorer | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -94,17 +105,21 @@ function Panel({ identity }: PluginContext) {
   const [asking, setAsking] = useState(false);
   const session = identity.session ?? null;
 
+  const [attempt, setAttempt] = useState(0);
+  const [showAll, setShowAll] = useState(false);
+
   useEffect(() => {
     if (!base) return;
     let live = true;
-    fetch(`${base}/api/explorer`, { headers: { Accept: "application/json" } })
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`The explorer answered ${r.status}.`))))
+    setError(null);
+    fetch(`${base}/api/explorer`, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(60_000) })
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`it answered ${r.status}`))))
       .then((d) => live && setData(d))
-      .catch((e) => live && setError(e.message));
+      .catch((e) => live && setError(e.name === "TimeoutError" ? "no answer in a minute" : e.message));
     return () => {
       live = false;
     };
-  }, []);
+  }, [attempt]);
 
   useEffect(() => {
     if (!base || !session) return;
@@ -133,6 +148,7 @@ function Panel({ identity }: PluginContext) {
       <Page>
         <PageHeader icon={Link2} eyebrow="on chain" title={edition.instance.name} />
         <PageBody>
+          {switcher}
           <Empty>{edition.instance.name} has no explorer of its own yet. It comes with the collective's own address.</Empty>
         </PageBody>
       </Page>
@@ -140,6 +156,19 @@ function Panel({ identity }: PluginContext) {
 
   const g = data?.group && !data.group.error ? data.group : null;
   const ah = data?.assetHub && !data.assetHub.error ? data.assetHub : null;
+  const seeds = data?.seeds && !data.seeds.error ? data.seeds : null;
+  const host = base.replace(/^https:\/\//, "");
+  const atBlock = (n: number) => `Read at block ${n.toLocaleString("en-GB")}`;
+  const chainRow = (name: string, what: string, read: any, raw: any) => (
+    <Row
+      key={name}
+      title={name}
+      detail={read ? `${what}. ${atBlock(read.block.number)}.` : raw?.error ? `${what}. ${raw.error.replace(/^Could not read [^:]+: /, "Couldn't read it: ")}` : what}
+      status={read ? <Status tone="ok">read now</Status> : raw?.error ? <Status tone="danger">not read</Status> : <Status tone="warn" pulse>reading</Status>}
+    />
+  );
+  const LIMIT = 8;
+  const shown = members ? (showAll ? members.members : members.members.slice(0, LIMIT)) : [];
 
   return (
     <Page>
@@ -155,14 +184,38 @@ function Panel({ identity }: PluginContext) {
         }
       />
       <PageBody width="wide">
-        {error && <Notice tone="danger">{error}</Notice>}
+        {switcher}
+        {error && (
+          <Card tone="dashed">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="min-w-0">
+                <div className="font-tight text-sm font-medium">Couldn't reach the explorer</div>
+                <div className="mt-1 text-[13px] leading-relaxed text-[var(--muted)]">
+                  {host} didn't answer ({error}). Nothing below is a stored figure, so there is nothing to show until it does.
+                </div>
+              </div>
+              <Button variant="primary" onClick={() => setAttempt((n) => n + 1)}>
+                Try again
+              </Button>
+            </div>
+          </Card>
+        )}
         {!data && !error && <Waiting>Reading the chains…</Waiting>}
-        {data?.group?.error && <Notice tone="warn">{data.group.error}</Notice>}
+
+        {data && (
+          <Section label="The chains" lede="Each is read when you open this. A chain that doesn't answer says so and never falls back to an old number.">
+            <List>
+              {chainRow("Kreivo", "Membership and governance", g, data.group)}
+              {chainRow("Kusama Asset Hub", "Money, contracts and anchors", ah, data.assetHub)}
+              {data.seeds !== null && data.seeds !== undefined && chainRow("Seeds chain", "Contributions anchored by the group", seeds, data.seeds)}
+            </List>
+          </Section>
+        )}
 
         {g && (
           <Section label="The group">
             <List>
-              <Row title={`${g.members.count} members`} detail={`Community ${g.community} on Kreivo, read at block ${g.block.number.toLocaleString("en-GB")}`} status={<Status tone="ok">{g.state}</Status>} />
+              <Row title={`${g.members.count} members`} detail={`Community ${g.community} on Kreivo`} status={<Status tone="ok">{g.state}</Status>} />
               <Recount community={g.community} claimed={g.members.count} />
               <Row
                 title="Who can change it"
@@ -183,36 +236,6 @@ function Panel({ identity }: PluginContext) {
           </Section>
         )}
 
-        <Section label="Who is in it" lede="Only members see names. Each name is the one the door holds for an account that holds a membership now.">
-          {!session && !asking && (
-            <Card tone="dashed">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <span className="text-[13px] text-[var(--muted)]">Sign in to see who else is in {edition.instance.name}.</span>
-                <Button variant="primary" onClick={() => setAsking(true)}>
-                  Sign in
-                </Button>
-              </div>
-            </Card>
-          )}
-          {!session && asking && <PasskeySignIn onSignedIn={(who) => { signIn(who); setAsking(false); }} title={`Sign in to ${edition.instance.name}`} />}
-          {session && !members && !membersError && <Waiting>Asking the door…</Waiting>}
-          {membersError && <Notice tone="warn">{membersError}</Notice>}
-          {members && (
-            <>
-              <List>
-                {members.members.map((m) => (
-                  <Row
-                    key={m.address}
-                    title={m.name ?? "Unnamed"}
-                    detail={`${short(m.address)} · membership ${m.memberships.join(", ")}`}
-                    status={m.you ? <Status tone="live">you</Status> : undefined}
-                  />
-                ))}
-              </List>
-              <Notice>{members.line}</Notice>
-            </>
-          )}
-        </Section>
 
         {data && (
           <Section label="What it can prove">
@@ -235,7 +258,7 @@ function Panel({ identity }: PluginContext) {
         )}
 
         {ah && (
-          <Section label="What it holds">
+          <Section label="What it holds" lede="On Kusama Asset Hub: the group's accounts and the contracts it owns.">
             <List>
               {ah.accounts.map((a: any) => (
                 <Row key={a.address} title={a.label} detail={`${a.what} · ${short(a.address)}`} status={<Status>{a.dUSD} dUSD</Status>} />
@@ -247,7 +270,98 @@ function Panel({ identity }: PluginContext) {
           </Section>
         )}
 
-        {data && <Facts items={[["read", new Date(data.readAt).toLocaleString("en-GB")], ["from", base.replace(/^https:\/\//, "")]]} />}
+        <Section label="Who is in it" lede="Only members see names. Each name is the one the door holds for an account that holds a membership now.">
+          {!session && !asking && (
+            <Card tone="dashed">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <span className="text-[13px] text-[var(--muted)]">Sign in to see who else is in {edition.instance.name}.</span>
+                <Button variant="primary" onClick={() => setAsking(true)}>
+                  Sign in
+                </Button>
+              </div>
+            </Card>
+          )}
+          {!session && asking && <PasskeySignIn onSignedIn={(who) => { signIn(who); setAsking(false); }} title={`Sign in to ${edition.instance.name}`} />}
+          {session && !members && !membersError && <Waiting>Asking the door…</Waiting>}
+          {membersError && <Notice tone="warn">{membersError}</Notice>}
+          {members && (
+            <>
+              <List>
+                {shown.map((m) => (
+                  <Row
+                    key={m.address}
+                    title={m.name ?? "Unnamed"}
+                    detail={`${short(m.address)} · membership ${m.memberships.join(", ")}`}
+                    status={m.you ? <Status tone="live">you</Status> : undefined}
+                  />
+                ))}
+              </List>
+              {members.members.length > LIMIT && (
+                <div className="mt-3">
+                  <Button variant="quiet" onClick={() => setShowAll((v) => !v)}>
+                    {showAll ? "Show fewer" : `Show all ${members.members.length}`}
+                  </Button>
+                </div>
+              )}
+              <Notice>{members.line}</Notice>
+            </>
+          )}
+        </Section>
+
+        {data && <Facts items={[["read", new Date(data.readAt).toLocaleString("en-GB")], ["from", host]]} />}
+      </PageBody>
+    </Page>
+  );
+}
+
+const CHAIN_KEY = "murmur.onchain.chain.v1";
+
+function Panel(ctx: PluginContext) {
+  const tabs: [Tab, string][] = [
+    ["group", "Your group"],
+    ...(hasHub ? ([["chains", "Chains"]] as [Tab, string][]) : []),
+    ...(hasHub && BUILDS ? ([["build", "Build a call"]] as [Tab, string][]) : []),
+  ];
+  const [tab, setTab] = useState<Tab>("group");
+  const [chain, setChainState] = useState<Chain>(() => (localStorage.getItem(CHAIN_KEY) as Chain) || "kreivo");
+  const setChain = (c: Chain) => {
+    localStorage.setItem(CHAIN_KEY, c);
+    setChainState(c);
+  };
+  const switcher =
+    tabs.length > 1 ? (
+      <div className="mb-6 flex gap-1" role="tablist">
+        {tabs.map(([id, label]) => (
+          <button
+            key={id}
+            role="tab"
+            aria-selected={tab === id}
+            onClick={() => setTab(id)}
+            data-active={tab === id}
+            className="rounded-full border border-[var(--line)] px-3 py-1 text-xs text-[var(--muted)] transition hover:text-[var(--fg)] data-[active=true]:border-[var(--fg)] data-[active=true]:text-[var(--fg)]"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+    ) : null;
+  if (tab === "group") return <GroupView {...ctx} switcher={switcher} />;
+  return (
+    <Page>
+      <PageHeader
+        icon={Link2}
+        eyebrow="on chain"
+        title={tab === "chains" ? "Chains" : "Build a call"}
+        lede={
+          tab === "chains"
+            ? "Any chain this app follows, read on this computer: blocks as they arrive, accounts, and everything the chain keeps."
+            : "Any call the chain takes. The app reads it back to you in plain words before you sign."
+        }
+        actions={<ChainPicker chain={chain} onPick={setChain} />}
+      />
+      <PageBody width="wide">
+        {switcher}
+        {tab === "chains" ? <ChainBrowser key={chain} chain={chain} /> : <CallBuilder key={chain} chain={chain} open={ctx.open} />}
       </PageBody>
     </Page>
   );
@@ -261,6 +375,7 @@ export const onchainPlugin: MurmurPlugin = {
   order: 60,
   kind: "plugin",
   support: issues("onchain"),
-  backend: "infra/services/explorer, on the collective's own address",
+  backend: "infra/services/explorer, on the collective's own address, and the light client on this computer",
+  signs: ["paseo"],
   Panel,
 };

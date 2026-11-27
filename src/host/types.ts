@@ -43,6 +43,12 @@ interface ModuleBase {
    */
   lab?: boolean;
   /**
+   * The chains this plugin may ask the app to sign on (ADR 0080, step 4). The
+   * app's signer (`../lib/signer.ts`) refuses any other, and the member approves
+   * each call on the app's own screen. Plugins never hold the key.
+   */
+  signs?: ("paseo" | "kusama" | "kreivo")[];
+  /**
    * The collective that made it, shown on market plugins. Unset means Decent.
    * (Which tier a plugin sits in is per edition: `tierOf` in `../edition.ts`.)
    */

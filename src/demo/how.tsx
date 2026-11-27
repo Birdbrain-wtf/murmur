@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { ArrowDown, Lightbulb, Mail } from "lucide-react";
 import type { MurmurModule } from "../host/types";
 import { Button, Page, PageBody, PageHeader } from "../ui";
+import { edition } from "../edition";
 import { RISO } from "./sample";
 import { askForLogins, askLabel } from "./note";
 import { TailorForm } from "./tailor";
@@ -24,6 +25,8 @@ import { TailorForm } from "./tailor";
  */
 
 const INK = { ...RISO, violet: "#7b4fc4", green: "#1f9d6b", ink: "#1a1a1a" };
+/** The group this window is about: Huxley in the public demo, the group itself in its sketch. */
+const HOME = edition.instance.name;
 const still = () => typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
 const LAYERS = [
@@ -290,7 +293,7 @@ function MoneyArt() {
 // ── 3 · the intelligence ────────────────────────────────────────────────────
 
 const GROUP_DOTS = [
-  { name: "Huxley", ink: INK.ink, shares: true },
+  { name: HOME, ink: INK.ink, shares: true },
   { name: "Halfmoon", ink: INK.blue, shares: true },
   { name: "Northside", ink: INK.green, shares: false },
   { name: "Common Loaf", ink: INK.yellow, shares: true },
@@ -467,6 +470,8 @@ const CONTRAST: [string, string][] = [
 // ── 4 · the conversations ───────────────────────────────────────────────────
 
 function TalkArt() {
+  // Wide enough for the group's own name ("Block Power Music"), never narrower than the drawing.
+  const box = (name: string) => Math.max(68, Math.round(name.length * 6.2) + 16);
   const group = (x: number, name: string, ink: string) => (
     <g transform={`translate(${x},150)`}>
       {[0, 1, 2, 3, 4].map((k) => {
@@ -479,7 +484,7 @@ function TalkArt() {
           </g>
         );
       })}
-      <rect x={-34} y={-20} width={68} height={40} rx={6} fill="#fff" stroke={INK.ink} strokeWidth={1.3} />
+      <rect x={-box(name) / 2} y={-20} width={box(name)} height={40} rx={6} fill="#fff" stroke={INK.ink} strokeWidth={1.3} />
       <rect x={-26} y={-12} width={52} height={3} fill={ink} />
       <rect x={-26} y={-5} width={36} height={3} fill={INK.ink} opacity={0.25} />
       <text y={14} textAnchor="middle" fontSize="10" fontWeight={600} fill={INK.ink}>{name}</text>
@@ -496,7 +501,7 @@ function TalkArt() {
       <path d={link} stroke={INK.ink} strokeOpacity={0.35} fill="none" />
       <Pulse path={link} ink={INK.pink} r={4.5} dur={2.2} />
       <Pulse path="M416,150 C330,150 230,150 144,150" ink={INK.blue} r={4.5} dur={2.2} begin={1.1} />
-      {group(110, "Huxley", INK.pink)}
+      {group(110, HOME, INK.pink)}
       {group(450, "Halfmoon", INK.blue)}
       <text x={280} y={262} textAnchor="middle" fontSize="11.5" fill={INK.ink} opacity={0.7}>
         Each group's chat runs on its own server. Servers talk to each other directly.
@@ -603,7 +608,7 @@ function Panel() {
           ink={INK.blue}
           kicker="The conversations"
           title="No platform in the middle"
-          thread="Alice talked her answer through with Bob first, in Huxley's chat. That conversation lives on Huxley's server, nobody else's."
+          thread={`Alice talked her answer through with Bob first, in ${HOME}'s chat. That conversation lives on ${HOME}'s server, nobody else's.`}
           art={<TalkArt />}
           today="Each group gets its own chat server, opened with its passkey, and calls run on it too. We host the machines for now."
           next="End-to-end encryption in the app, and groups running their own machine if they want one."
@@ -635,7 +640,7 @@ function Panel() {
           next="The card and treasury, where a bank's margin pays for the network instead."
         >
           <Point ink={INK.green} title="Who we are">
-            Decent incubates groups like Huxley and sets you up, from nothing to a company, charity or co-op.
+            Decent incubates groups like yours and sets you up, from nothing to a company, charity or co-op.
           </Point>
           <Point ink={INK.yellow} title="Where our money comes from">
             Reserve interest and card fees a bank would keep, and a share of the 10%.
